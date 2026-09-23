@@ -39,3 +39,19 @@ Every folder, listed from above, will be versioned with dvc and stored remotely 
 To be in sync with the data stored in the `DagsHub` backend use `dvc`. `DVC` works similar to git, so all the commands you know and love will still work. For example, for pulling changes for the data, you should use `dvc pull`. The configuration for dvc is defined in the [this](./.dvc/config) config file. For security reasons you need to fill in the [config.local.sample](./.dvc/config.local.sample) to access the backend. If you a contributor to the project, you can find the access credentials [here](https://dagshub.com/viki123v/llm-knowledge-enhancement/src/feature/NLP-13/s3:/llm-knowledge-enhancement). 
 
 To start the databases, firstly fill in the placeholder values in [.env.sample](.env.sample). After that run `docker compose up` and this should start the databases with all the configuration. 
+
+## Paper
+
+The LaTeX paper lives in [paper/](paper/). Every table and figure in it is generated
+from a saved experiment run; nothing is typed in by hand.
+
+```sh
+# 1. Regenerate tables/figures from a run (pilot now, full/ later). No API calls, no training.
+.venv/bin/python scripts/paper_results.py artifacts/experiments/<protocol>/<run>
+# 2. Compile (install once with: brew install tectonic)
+cd paper && tectonic main.tex
+```
+
+On a pilot run every generated caption is marked **[ENGINEERING PILOT]**. The paper
+compiles without any run too: missing inputs show as placeholder boxes. Result-dependent
+text is marked with red `\todo{}` notes. Offline check: `.venv/bin/python scripts/test_paper_results.py`.

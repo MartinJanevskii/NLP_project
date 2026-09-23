@@ -9,6 +9,7 @@
   \usepackage[utf8]{inputenc}
 \fi
 \usepackage[english]{babel}
+\usepackage{microtype}
 % Tables and figures
 \usepackage{array}
 \usepackage{booktabs}
@@ -389,20 +390,146 @@ Each description is encoded with \texttt{princeton-nlp/sup-simcse-roberta-large}
 
 \section{Experimental Setup}
 \label{sec:setup}
+\subsection{Training Protocol}
+All nine configurations are trained with the original CoLaKG hyperparameters for MovieLens-1M (Table~\ref{tab:hyper}), taken unchanged from the released training script. The only thing that differs between configurations is the item semantic tensor. Each configuration is trained with three random seeds (42, 123 and 2026), which change the parameter initialisation, the dropout masks and the negative sampling.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lr}
+\toprule
+Hyperparameter & Value \\
+\midrule
+ID embedding dimension & 64 \\
+LightGCN layers $L$ & 3 \\
+Learning rate (Adam) & $10^{-3}$ \\
+L2 regularisation $\lambda$ & $10^{-4}$ \\
+Batch size & 4,096 \\
+Dropout on item / user semantic vectors & 0.6 / 0.6 \\
+Dropout on neighbour attention & 0.6 \\
+Semantic neighbours per item $k$ & 30 \\
+Training epochs & 2,000 \\
+Seeds & 42, 123, 2026 \\
+\bottomrule
+\end{tabular}
+\caption{Training hyperparameters (identical for all configurations)}
+\label{tab:hyper}
+\end{table}
+
+The original training script evaluates on the test set every five epochs, before the training step of that epoch. We report the \emph{last} scheduled evaluation (before epoch 1,996 of 2,000) and do not select the best epoch on the test set, since that would leak test information into model selection. Our training wrapper saves the model, optimiser and random-number states after every epoch, so an interrupted run can be resumed exactly; we checked that an interrupted and resumed run reproduces the metrics of an uninterrupted one.
+
+\paragraph{Reference model.} As a reference, we also train the original CoLaKG model with its published item and user embeddings (generated with the original prompt) and its original seed 2020.
+
+\subsection{Evaluation Metrics}
+For each test user $u$ we rank \emph{all} items in the catalogue, after removing the items $u$ interacted with during training. Let $R_u^K$ be the top-$K$ items and $T_u$ the user's test items. We use two standard metrics, averaged over all test users, with $K\in\{10,20\}$:
+\begin{align}
+\mathrm{Recall@}K(u) &= \frac{|R_u^K \cap T_u|}{|T_u|}, \\
+\mathrm{NDCG@}K(u) &= \frac{\mathrm{DCG@}K(u)}{\mathrm{IDCG@}K(u)}, \qquad
+\mathrm{DCG@}K(u) = \sum_{p=1}^{K} \frac{\mathbb{1}\left[R_u^K[p]\in T_u\right]}{\log_2(p+1)}.
+\end{align}
+Recall measures how many of the relevant items are found at all, and NDCG~\cite{jarvelin2002ndcg} also rewards placing them near the top. $\mathrm{IDCG@}K$ is the DCG of an ideal ranking, so NDCG lies in $[0,1]$.
+
+\subsection{Contrasts for the Research Questions}
+Let $M(c,s)$ be a metric of configuration $c$ trained with seed $s$. Because all configurations share the same seeds, we compare them \emph{per seed} (paired) and then report the mean and sample standard deviation of the per-seed differences $\Delta_s$ over the three seeds:
+\begin{align}
+\text{RQ1:}\quad \Delta_s &= \tfrac{1}{3}\textstyle\sum_{P\in\{P1,P2,P3\}}\big[M(\text{H2}P,s)-M(\text{H1}P,s)\big], \\
+\text{RQ2:}\quad \Delta_s &= \tfrac{1}{2}\textstyle\sum_{H\in\{H1,H2\}}\big[M(H P_k,s)-M(H\text{P1},s)\big], \quad P_k\in\{\text{P2},\text{P3}\}, \\
+\text{RQ3:}\quad \Delta_s &= \big[M(\text{H2}P_k,s)-M(\text{H1}P_k,s)\big]-\big[M(\text{H2P1},s)-M(\text{H1P1},s)\big], \\
+\text{RQ4:}\quad \Delta_s &= M(\text{H3}P,s)-M(\text{H2}P,s), \quad \text{separately for each } P.
+\end{align}
+RQ1 is the average effect of depth, RQ2 the average effect of the prompt, and RQ3 a \emph{difference-in-differences}: it is zero if the depth effect is the same under both prompts. RQ2 and RQ3 use only H1 and H2, so that the depth and prompt factors form a clean $2\times3$ design; H3 is analysed separately in RQ4. With only three seeds, the standard deviation describes run-to-run spread and is \emph{not} a confidence interval; we do not claim statistical significance.
+
+\subsection{Grounding Proxies}
+\label{sec:grounding-metrics}
+To measure how faithful the generated text is to its context (RQ5), let $\mathcal{E}(c)$ be the set of entity names that appear in the context of an item (heads and tails of its triples) and $\mathcal{V}$ the set of all entity names in the KG. We find the names from $\mathcal{V}$ that appear in the response as whole words (case-insensitive, ignoring names of two characters or fewer and ``unknown''), and call this set $\mathcal{M}$. We then compute
+\begin{equation}
+\text{coverage} = \frac{|\mathcal{M}\cap\mathcal{E}(c)|}{|\mathcal{E}(c)|}, \qquad
+\text{unsupported} = |\mathcal{M}\setminus\mathcal{E}(c)|.
+\end{equation}
+Coverage tells us how much of the supplied information the description uses; the unsupported count is the number of \emph{known} KG entities the response mentions without being given them. These are cheap proxies with clear limits. Exact matching misses aliases and paraphrases (``Hanks'' for ``Tom Hanks''), cannot see invented entities that are not in the KG at all, and produces false matches for short or common titles (a movie called \emph{Heat} matches the word ``heat''). The unsupported count is therefore \emph{not} a hallucination rate; it is best read as a relative signal between configurations.
+
+\subsection{Embedding-Space Analysis}
+Recommendation metrics depend on the whole training process. To look at the item vectors directly, we measure whether items that are close in the semantic space share KG attributes. For a kind of attribute $\kappa\in\{\text{director}, \text{actor}, \text{genre set}\}$, let $A_\kappa(i)$ be item $i$'s attributes of that kind and $\mathrm{NN}_k(i)$ its $k=10$ nearest items by cosine similarity. The neighbour agreement is
+\begin{equation}
+\mathrm{Agree}_\kappa = \frac{1}{|\mathcal{I}|}\sum_{i\in\mathcal{I}}\frac{1}{k}\sum_{j\in\mathrm{NN}_k(i)}\mathbb{1}\big[A_\kappa(i)\cap A_\kappa(j)\neq\emptyset\big].
+\end{equation}
+Here ``genre set'' means the exact set of genres, so two movies agree only if they have the same combination. A higher value means that the descriptions put movies with the same director, cast or genre profile close together, which matters directly for CoLaKG's semantic neighbours (Section~\ref{sec:colakg}). We also compute the metric for the published CoLaKG embeddings of the same items and visualise the spaces with t-SNE~\cite{maaten2008tsne}.
+
+\subsection{Reproducibility and Engineering Pilots}
+Every stage writes its outputs to disk together with a fingerprint of its inputs: the protocol (prompts, encoder, model, context seed, input-file hashes) determines the experiment directory; each LLM response is keyed by a hash of its exact request; each vector by a hash of the encoder and text; each training result by a hash of its inputs, code and environment. A stage whose inputs have not changed is skipped, and a stage whose inputs have changed refuses to reuse stale results. All tables and figures in Sections~\ref{sec:data}--\ref{sec:results} are produced by one command, \texttt{scripts/paper\_results.py}, from these saved files.
+
+Before the full experiment, the whole pipeline was validated with \emph{engineering pilots} on the first 20 and 100 items of the catalogue. In a pilot, only the selected items receive new vectors (the others keep the published ones), each seed trains for only two small batches, and evaluation uses 100 fixed users. Pilots check that every stage connects and produces valid numbers; they are too small to support any conclusion about the research questions, and every table or figure computed from a pilot is marked \textbf{[ENGINEERING PILOT]}.
+
+\paragraph{Environment.} \sloppy Text generation used the DeepSeek API with the requested model alias \texttt{deepseek-chat}; the saved responses report the served model name, which we record with each response. \todo{GPU model, CUDA and PyTorch versions, and wall-clock time of the full run.}
 
 \section{Results}
 \label{sec:results}
+\ifpilotrun
+\begin{center}
+\fcolorbox{red!60!black}{red!5}{\parbox{0.92\linewidth}{\small\textbf{Note.} The tables and figures in this section were generated from the engineering pilot \texttt{\RunName} (\RunItems{} items, \RunEpochs{} training steps per seed). They demonstrate the reporting pipeline and are \emph{not} research results. Re-run \texttt{scripts/paper\_results.py} on the full run to replace them.}}
+\end{center}
+\fi
+
+\subsection{Overall Accuracy}
 \gentable{main_results}
-\genfigure{heatmap_ndcg20}{NDCG@20 per configuration}
+\genfigure[0.55]{heatmap_ndcg20}{Mean NDCG@20 of the nine configurations (rows: context, columns: prompt)\RunTag}
+\todo{describe the overall picture: best configuration, spread between configurations compared with the seed spread, and comparison with the reference CoLaKG model.}
+
+\subsection{RQ1--RQ4: Context and Prompt Effects}
+\gentable{contrasts}
+\todo{discuss each contrast: sign, size relative to its standard deviation, and whether NDCG and Recall agree.}
+
+\subsection{RQ5: Grounding of the Generated Text}
+\gentable{text_stats}
+\genfigure[0.95]{grounding}{Entity coverage and unsupported known entities per configuration\RunTag}
+\todo{discuss coverage and unsupported mentions per context and prompt, keeping the limits of the proxies (Section~\ref{sec:grounding-metrics}) in mind.}
+
+\medskip
+\InputIfFileExists{generated/qualitative.tex}{}{\placeholder{run scripts/paper\_results.py to generate the qualitative examples}}
+\todo{comment on the qualitative differences between the three example descriptions.}
+
+\subsection{Cost versus Quality}
+\genfigure[0.8]{cost_quality}{Mean tokens per item against NDCG@20\RunTag}
+\todo{discuss whether the more expensive contexts pay off.}
+
+\subsection{Embedding Space}
+\gentable{embedding_neighbours}
+\genfigure[1.0]{tsne}{t-SNE projections of the item semantic vectors, coloured by first listed genre\RunTag}
+\todo{discuss which configurations put related movies closer together and how this relates to accuracy.}
 
 \section{Discussion}
 \label{sec:discussion}
+In this section we interpret the results for each research question. For each one we first state what would count as support, so that the interpretation does not depend on what the numbers turn out to be.
+
+\paragraph{RQ1: Does more context help?} Support would be a positive depth effect (H2 $-$ H1) that is larger than its seed-to-seed spread in both NDCG and Recall. A negative effect would suggest that the extra two-hop facts mainly add noise, which would be consistent with the hub problem of Section~\ref{sec:data}. \todo{finding.}
+
+\paragraph{RQ2: Does the prompt matter?} Support for P2 would mean that explicit extraction helps the model use the context; support for P3 would mean that telling the model about the downstream task helps. Since P2 responses contain an extracted list of entities, a gain for P2 could also come from the encoder seeing the entity names more explicitly rather than from better ``reasoning''. \todo{finding.}
+
+\paragraph{RQ3: Do context and prompt interact?} A clearly non-zero difference-in-differences would mean that the best prompt depends on how much context is given, for example that extraction is useful only for the long H2 contexts. \todo{finding.}
+
+\paragraph{RQ4: Does filtering help?} If H3 performs at least as well as H2, we can obtain the same (or better) accuracy with far fewer tokens, since H3 contexts are much shorter (Table~\ref{tab:context_sizes}). \todo{finding.}
+
+\paragraph{RQ5: Is the text grounded?} We expect coverage to fall as the context grows, since a 200-word description cannot mention every fact of a 40-triple context, and we are interested in whether the prompts differ in how many unsupported entities they introduce. \todo{finding, and whether grounding is related to accuracy.}
+
+\paragraph{Embedding space.} \todo{relate the neighbour-agreement scores to the accuracy results: do configurations that group related movies together also recommend better?}
 
 \section{Limitations and Future Work}
 \label{sec:limitations}
+Our study has several limitations that should be kept in mind when reading the results.
+\begin{itemize}
+    \item \textbf{One dataset, one generator, one encoder.} All experiments use MovieLens-1M, a single LLM and a single sentence encoder. Movie metadata is rich and well known to LLMs; the conclusions may not transfer to domains with sparser or less familiar knowledge, or to other models.
+    \item \textbf{Three seeds.} Three seeds are enough to see the order of magnitude of the run-to-run spread but not to test significance. A stronger analysis would compare configurations per user with a paired test (e.g.\ a Wilcoxon signed-rank test on per-user NDCG), which requires logging per-user scores. We did not add this, because changing the training wrapper would invalidate the fingerprints of already completed runs; it is the most important piece of future work.
+    \item \textbf{Proxy grounding metrics.} As explained in Section~\ref{sec:grounding-metrics}, exact name matching misses aliases and invented entities and produces false matches for common words. A proper evaluation would use entity linking or human annotation of a sample of descriptions.
+    \item \textbf{Reconstructed knowledge graph.} Our KG is rebuilt from the released metadata and its statistics differ from those reported for CoLaKG. Both our configurations and our comparisons use the same graph, but absolute numbers are not directly comparable with the original paper.
+    \item \textbf{A hand-designed filter.} H3 is a heuristic based on one inspection of the degree distribution. Learned or relevance-based subgraph selection (for example, choosing two-hop neighbours that users actually co-consume) could work better.
+    \item \textbf{Fixed user representations.} Only item descriptions change; the user profiles are the published ones, generated with the original prompt. A mismatch between the style of new item descriptions and old user profiles could hide some effects.
+    \item \textbf{Provider behaviour.} We requested the alias \texttt{deepseek-chat}, but the provider reported a different served model name. Aliases can change over time, so exact regeneration of the texts later may not be possible; this is why every response is cached with its metadata.
+    \item \textbf{Pilot ordering.} The engineering pilots use the first items in index order rather than a random sample. This does not affect the full experiment, but it is another reason why pilot numbers are not results.
+\end{itemize}
 
 \section{Conclusion}
 \label{sec:conclusion}
+We studied how the information given to an LLM affects the item descriptions used by an LLM-enhanced recommender. Keeping the CoLaKG model, data, encoder and training protocol fixed, we varied the knowledge-graph context (direct facts, two-hop facts, and filtered two-hop facts) and the prompt (generic, extract-then-describe, and recommendation-oriented), and evaluated the nine combinations on ranking accuracy, text grounding and embedding geometry. \todo{two or three sentences summarising the answers to RQ1--RQ5.} Beyond the specific findings, the project shows that the input to the LLM is a design choice with a measurable effect in its own right, and that it can be studied in a controlled and reproducible way by caching every intermediate artifact and generating all reported numbers from saved files.
 
 \bibliographystyle{plainnat}
 \bibliography{references}
