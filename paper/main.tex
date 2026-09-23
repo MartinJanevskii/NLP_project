@@ -59,6 +59,7 @@
 
 % Generated results: every measured number comes from scripts/paper_results.py
 \newif\ifpilotrun
+\newif\ifreducedrun
 \def\RunTag{}\def\RunName{none}\def\RunItems{--}\def\RunEpochs{--}
 \InputIfFileExists{generated/run_info.tex}{}{}
 \newcommand{\todo}[1]{\textcolor{red!70!black}{\textbf{[TODO:} #1\textbf{]}}}
@@ -460,6 +461,26 @@ Every stage writes its outputs to disk together with a fingerprint of its inputs
 
 Before the full experiment, the whole pipeline was validated with \emph{engineering pilots} on the first 20 and 100 items of the catalogue. In a pilot, only the selected items receive new vectors (the others keep the published ones), each seed trains for only two small batches, and evaluation uses 100 fixed users. Pilots check that every stage connects and produces valid numbers; they are too small to support any conclusion about the research questions, and every table or figure computed from a pilot is marked \textbf{[ENGINEERING PILOT]}.
 
+\subsection{Reduced Protocol}
+\label{sec:reduced}
+The full protocol above needs about 28 runs of 2,000 epochs each. On the Apple M4 laptop available to us, one training epoch of CoLaKG on the full data takes about 25\,s on the GPU (Metal backend) and 43\,s on the CPU, which would add up to roughly 18 days. We therefore run a \emph{reduced protocol} that keeps every configuration, every seed and all hyperparameters, and reduces only the data and the number of epochs:
+\begin{itemize}
+    \item \textbf{Item sample.} We draw 1,000 of the 3,260 items uniformly at random (seed 2026) and keep only the interactions with these items from the supplied training and test files, so the split itself is unchanged. Users left without a training or a test interaction are removed, and users and items are re-indexed. The LLM contexts are still built from the full knowledge graph, so the text of an item does not depend on which other items were sampled. Table~\ref{tab:dataset_summary} describes the result.
+    \item \textbf{Epoch budget chosen on validation data.} We hold out 10\% of each user's \emph{training} interactions as a validation set and train the reference model (published embeddings) on the rest for up to 600 epochs, evaluating validation NDCG@20 every 10 epochs and stopping after 10 evaluations without improvement. The budget $E$ is the first evaluated epoch that reaches 99\% of the best validation score, clamped to $[50,400]$. All 30 runs (the reference model and the nine configurations, each with three seeds) are then trained on the full reduced training set for exactly $E$ epochs and evaluated once on the test set. The test set is never used to choose anything.
+    \item \textbf{Device.} Training runs on the Apple GPU. The upstream code is unchanged; only our wrapper selects the device.
+    \item \textbf{Truncated responses.} At temperature 0 a response that reaches the 512-token limit is the same on every retry. Such responses are kept as generated, flagged, and counted per configuration; transient API errors are retried.
+\end{itemize}
+
+\paragraph{Pre-registered test.} Three seeds are not enough to test differences between configurations, but every run ranks items for thousands of users. We therefore fix the following analysis before looking at any result. For each user we average NDCG@20 over the three seeds and apply the contrast weights of Section~\ref{sec:setup} to obtain a per-user difference $d_u$. For each of the eight contrasts we test $H_0$: the median of $d_u$ is zero with a two-sided paired Wilcoxon signed-rank test, correct the eight $p$-values with the Holm method, and report the mean difference with a 95\% bootstrap confidence interval (2,000 resamples). A contrast is
+\begin{itemize}
+    \item \textbf{supported} if $p_{\text{Holm}}<0.05$, the mean difference is positive and all three per-seed differences are positive;
+    \item \textbf{opposite} if $p_{\text{Holm}}<0.05$, the mean difference is negative and all three per-seed differences are negative;
+    \item \textbf{inconclusive} otherwise.
+\end{itemize}
+The same analysis on Recall@20 is reported as a secondary check. RQ5 remains descriptive. Absolute numbers from the reduced protocol are not comparable with the full-catalogue numbers of the CoLaKG paper, but the comparison between configurations is fair, because all of them see exactly the same data, epochs and seeds.
+
+\gentable{dataset_summary}
+
 \paragraph{Environment.} \sloppy Text generation used the DeepSeek API with the requested model alias \texttt{deepseek-chat}; the saved responses report the served model name, which we record with each response. \todo{GPU model, CUDA and PyTorch versions, and wall-clock time of the full run.}
 
 \section{Results}
@@ -470,6 +491,12 @@ Before the full experiment, the whole pipeline was validated with \emph{engineer
 \end{center}
 \fi
 
+\ifreducedrun
+\begin{center}
+\fcolorbox{blue!50!black}{blue!4}{\parbox{0.92\linewidth}{\small\textbf{Note.} All results in this section come from the reduced protocol of Section~\ref{sec:reduced} (run \texttt{\RunName}, \RunItems{} items, $E=\RunEpochs$ epochs per run).}}
+\end{center}
+\fi
+
 \subsection{Overall Accuracy}
 \gentable{main_results}
 \genfigure[0.55]{heatmap_ndcg20}{Mean NDCG@20 of the nine configurations (rows: context, columns: prompt)\RunTag}
@@ -477,6 +504,7 @@ Before the full experiment, the whole pipeline was validated with \emph{engineer
 
 \subsection{RQ1--RQ4: Context and Prompt Effects}
 \gentable{contrasts}
+\gentable{significance}
 \todo{discuss each contrast: sign, size relative to its standard deviation, and whether NDCG and Recall agree.}
 
 \subsection{RQ5: Grounding of the Generated Text}
@@ -487,6 +515,10 @@ Before the full experiment, the whole pipeline was validated with \emph{engineer
 \medskip
 \InputIfFileExists{generated/qualitative.tex}{}{\placeholder{run scripts/paper\_results.py to generate the qualitative examples}}
 \todo{comment on the qualitative differences between the three example descriptions.}
+
+\subsection{Training Dynamics}
+\genfigure[1.0]{learning_curves}{Left: validation curve used to choose the epoch budget. Right: test NDCG@20 during training (seed 42), shown for illustration only and not used for any choice\RunTag}
+\todo{comment on convergence and whether the configurations separate early or late.}
 
 \subsection{Cost versus Quality}
 \genfigure[0.8]{cost_quality}{Mean tokens per item against NDCG@20\RunTag}

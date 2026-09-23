@@ -1,5 +1,6 @@
 """Offline checks for the paper results generator."""
 
+import json
 import tempfile
 from pathlib import Path
 
@@ -76,4 +77,45 @@ with tempfile.TemporaryDirectory() as folder:
     )
     pr.results(partial, pilot=False)
     assert "CoLaKG (orig.)" in (pr.OUT / "main_results.tex").read_text()
+    # Reduced overnight runs: reference row from its three seeds, significance and dataset tables.
+    reduced = Path(folder) / "reduced"
+    (reduced / "reference").mkdir(parents=True)
+    for seed, value in ((42, 0.1), (123, 0.2), (2026, 0.3)):
+        (reduced / "reference" / f"seed_{seed}.json").write_text(
+            json.dumps(
+                {"status": "COMPLETE", "metrics": {m: value for m in pr.METRICS}}
+            )
+        )
+    assert pr.reference_row(reduced)[1] == "0.2000 $\\pm$ 0.1000"
+    assert pr.reference_row(Path(folder) / "missing") is None
+    pr.significance(reduced)
+    pr.dataset_summary(reduced)
+    assert "Pending:" in (pr.OUT / "significance.tex").read_text()
+    assert "Pending:" in (pr.OUT / "dataset_summary.tex").read_text()
+    (reduced / "significance.csv").write_text(
+        "comparison,metric,mean_difference,ci_low,ci_high,seed_differences,p,users,p_holm,verdict\n"
+        'RQ1_H2_minus_H1,ndcg@20,0.001,0.0005,0.0015,"[0.001, 0.002, 0.001]",0.001,5758,0.008,supported\n'
+        'RQ1_H2_minus_H1,recall@20,0.001,0.0,0.002,"[0.001, 0.001, 0.001]",0.2,5758,0.9,secondary\n'
+    )
+    (reduced / "data").mkdir()
+    (reduced / "data" / "dataset.json").write_text(
+        json.dumps(
+            {
+                "items": 1000,
+                "users": 5758,
+                "train_interactions": 10,
+                "test_interactions": 5,
+                "density": 0.05,
+                "val_interactions": 1,
+                "sampled_items": 1000,
+                "sample_seed": 2026,
+            }
+        )
+    )
+    pr.significance(reduced)
+    pr.dataset_summary(reduced)
+    text = (pr.OUT / "significance.tex").read_text()
+    assert "supported" in text and "secondary" not in text and "+++" in text
+    assert "5,758" in (pr.OUT / "dataset_summary.tex").read_text()
+    pr.learning_curves(reduced, pilot=False)  # no curves saved: must not crash
 print("paper_results helper checks passed")

@@ -6,6 +6,7 @@ Usage: python scripts/paper_results.py artifacts/experiments/<protocol>/<run>
 
 import argparse
 import csv
+import json
 import os
 import re
 import statistics
@@ -162,6 +163,8 @@ def run_info(run, manifest, pilot):
     ]
     if pilot:
         lines.append(r"\pilotruntrue")
+    if manifest["purpose"] == "reduced":
+        lines.append(r"\reducedruntrue")
     (OUT / "run_info.tex").write_text("\n".join(lines) + "\n")
 
 
@@ -331,7 +334,10 @@ def results(run, pilot):
             for c in CONFIGS
             if c in summary
         ]
-        if not pilot:
+        reference = reference_row(run)
+        if reference:
+            rows.append(reference)
+        elif not pilot:
             baseline = load_manifest(ROOT / "artifacts/EXPERIMENT_MANIFEST.json")[
                 "baseline"
             ]
@@ -403,6 +409,145 @@ def results(run, pilot):
         ["Comparison", "$\\Delta$ NDCG@20", "$\\Delta$ Recall@20"],
         rows,
     )
+
+
+def reference_row(run):
+    """CoLaKG with its published embeddings, trained in the same run (reduced runs)."""
+    seeds = sorted((run / "reference").glob("seed_*.json"))
+    results = [read_json(p) for p in seeds]
+    results = [r for r in results if r.get("status") == "COMPLETE"]
+    if len(results) < 2:
+        return None
+    cells = []
+    for m in METRICS:
+        values = [r["metrics"][m] for r in results]
+        cells.append(
+            f"{statistics.mean(values):.4f} $\\pm$ {statistics.stdev(values):.4f}"
+        )
+    return ["CoLaKG (orig.)"] + cells
+
+
+def significance(run):
+    rows = [r for r in read_csv(run / "significance.csv") if r["metric"] == "ndcg@20"]
+    caption = (
+        "Pre-registered per-user tests on NDCG@20: mean difference, 95\\% bootstrap CI, "
+        "Holm-adjusted Wilcoxon $p$, sign of the three per-seed differences, verdict"
+    )
+    if not rows:
+        pending("significance", caption, "no per-user results yet")
+        return
+    body = []
+    for r in rows:
+        signs = "".join(
+            "+" if d > 0 else "$-$" for d in json.loads(r["seed_differences"])
+        )
+        body.append(
+            [
+                CONTRASTS.get(r["comparison"], tex(r["comparison"])),
+                f"{float(r['mean_difference']):+.5f}",
+                f"[{float(r['ci_low']):+.5f}, {float(r['ci_high']):+.5f}]",
+                f"{float(r['p_holm']):.3g}",
+                signs,
+                r"\textbf{" + r["verdict"] + "}"
+                if r["verdict"] != "inconclusive"
+                else r["verdict"],
+            ]
+        )
+    table(
+        "significance",
+        caption,
+        [
+            "Comparison",
+            "$\\Delta$",
+            "95\\% CI",
+            "$p_{\\text{Holm}}$",
+            "Seeds",
+            "Verdict",
+        ],
+        body,
+        "lrrrcl",
+    )
+
+
+def dataset_summary(run):
+    path = run / "data" / "dataset.json"
+    caption = (
+        "The reduced dataset (random item sample of the supplied MovieLens-1M split)"
+    )
+    if not path.exists():
+        pending("dataset_summary", caption, "no reduced dataset in this run")
+        return
+    d = read_json(path)
+    table(
+        "dataset_summary",
+        caption,
+        ["Quantity", "Value"],
+        [
+            [
+                "Sampled items (seed " + str(d["sample_seed"]) + ")",
+                f"{d['sampled_items']:,}",
+            ],
+            ["Items kept", f"{d['items']:,}"],
+            ["Users kept", f"{d['users']:,}"],
+            ["Training interactions", f"{d['train_interactions']:,}"],
+            ["Test interactions", f"{d['test_interactions']:,}"],
+            [
+                "Validation interactions (held out of training)",
+                f"{d['val_interactions']:,}",
+            ],
+            ["Density", f"{100 * d['density']:.2f}\\%"],
+        ],
+        tag=False,
+    )
+
+
+def learning_curves(run, pilot):
+    import matplotlib.pyplot as plt
+
+    budget = run / "epoch_budget.json"
+    curves = {}
+    for config in ["reference"] + CONFIGS:
+        path = run / config / "seed_42.json"
+        if path.exists() and read_json(path).get("curve"):
+            curves[config] = read_json(path)["curve"]
+    if not budget.exists() and not curves:
+        return
+    fig, (left, right) = plt.subplots(1, 2, figsize=(10, 3.6))
+    if budget.exists():
+        b = read_json(budget)
+        left.plot(
+            [p["epoch"] for p in b["curve"]],
+            [p["ndcg@20"] for p in b["curve"]],
+            marker=".",
+        )
+        left.axvline(
+            b["epochs"],
+            color="firebrick",
+            linestyle="--",
+            label=f"chosen E = {b['epochs']}",
+        )
+        left.set(
+            xlabel="Epoch",
+            ylabel="Validation NDCG@20",
+            title="Epoch budget (validation split)",
+        )
+        left.legend()
+    for config, curve in curves.items():
+        right.plot(
+            [p["epoch"] for p in curve],
+            [p["ndcg@20"] for p in curve],
+            label=config,
+            color="black" if config == "reference" else None,
+            linewidth=2 if config == "reference" else 1,
+        )
+    right.set(
+        xlabel="Epoch",
+        ylabel="Test NDCG@20 (seed 42)",
+        title="Training curves (not used for selection)",
+    )
+    if curves:
+        right.legend(fontsize=6, ncol=2)
+    save(fig, "learning_curves", pilot)
 
 
 def text_stats(run, pilot):
@@ -537,8 +682,16 @@ def embedding_space(run, rows_by_raw, pilot):
     published = torch.load(
         DATA / "movie_embeddings_simcse_kg.pt", map_location="cpu", weights_only=True
     )
+    # Rows carry raw MovieIDs; reduced runs re-index item_id, so map through item_map.txt.
+    original = dict(
+        tuple(map(int, line.split()))
+        for line in (DATA / "item_map.txt").read_text().splitlines()
+    )
     sets = {
-        "Published": (published[[r["item_id"] for r in order]].numpy(), order),
+        "Published": (
+            published[[original[r["raw_movie_id"]] for r in order]].numpy(),
+            order,
+        ),
         **sets,
     }
     kinds = ("director", "actor", "genre set")
@@ -618,6 +771,9 @@ def main():
     kg_tables(labels, adjacency)
     context_sizes(mapping, labels, adjacency)
     results(run, pilot)
+    significance(run)
+    dataset_summary(run)
+    learning_curves(run, pilot)
     text_stats(run, pilot)
     embedding_space(run, {int(m["MovieID"]): m for m in movies}, pilot)
     print("Paper inputs written to", OUT)
