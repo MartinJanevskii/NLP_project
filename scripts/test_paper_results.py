@@ -25,4 +25,11 @@ with tempfile.TemporaryDirectory() as folder:
     assert r"\label{tab:t}" in text
     pr.pending("p", "Cap", "no seeds")
     assert "Pending: no seeds" in (pr.OUT / "p.tex").read_text()
+    # A run with no completed seeds or responses yields pending tables, not a crash.
+    empty_run = Path(folder) / "run"
+    empty_run.mkdir()
+    pr.results(empty_run, pilot=True)
+    pr.text_stats(empty_run, pilot=True)
+    for name in ("main_results", "contrasts", "text_stats"):
+        assert "Pending:" in (pr.OUT / f"{name}.tex").read_text(), name
 print("paper_results helper checks passed")
