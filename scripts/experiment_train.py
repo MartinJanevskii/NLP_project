@@ -14,6 +14,11 @@ from llm_subset import atomic_json
 from run_baseline import UPSTREAM
 
 
+def parse_loss(text):
+    """Upstream BPR_train_original returns 'loss<value>-<timings>'."""
+    return float(re.match(r"loss(-?(?:\d+\.?\d*|nan|inf))", text)[1])
+
+
 def rank_metrics(top, truth, ks=(10, 20)):
     """Recall@k and NDCG@k for one user, exactly as upstream's batch metrics."""
     hits = [item in truth for item in top]
@@ -276,7 +281,7 @@ def main():
                 break
             began = time.time()
             text = BPR_train_original(dataset, model, bpr, epoch)
-            loss = float(re.match(r"loss([-0-9.naif]+)", text)[1])
+            loss = parse_loss(text)
             if not np.isfinite(loss):
                 raise ValueError("Non-finite loss")
             if args.eval_every and (epoch + 1) % args.eval_every == 0:
