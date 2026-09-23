@@ -81,17 +81,129 @@
 \maketitle
 
 \begin{abstract}
+Recent recommender systems use large language models (LLMs) to turn structured knowledge about items into natural-language descriptions, which are then embedded and used as side information. CoLaKG is one such model: for every movie it gives an LLM a small knowledge-graph (KG) subgraph, asks for a description, encodes that description with a sentence encoder and fuses the resulting vector into a graph-based collaborative filter. The recipe that produces this text is fixed, however, and it is not clear how much the result depends on \emph{what} the LLM is shown and \emph{how} it is asked. In this project we keep the CoLaKG recommender, the data split, the encoder and the user representations unchanged and vary only the input to the LLM. We compare three context strategies (direct facts only, direct facts plus sampled two-hop facts, and a filtered two-hop context) with three prompt strategies (a generic description, an extract-then-describe prompt, and a recommendation-oriented prompt), which gives nine configurations. We evaluate each configuration with Recall@$K$ and NDCG@$K$ over three training seeds, measure how well the generated text sticks to the supplied facts, and analyse the geometry of the resulting item embeddings. \todo{one or two sentences on the main findings once the full run is available.}
 \end{abstract}
 
 \section{Introduction}
 \label{sec:intro}
-We build on CoLaKG~\cite{cui2025colakg}.
+A recommender system tries to predict which items a user will like, based on what that user and similar users have liked in the past. The most successful models of the last decade are \emph{collaborative filtering} models, which learn a vector (embedding) for every user and item purely from the interaction data. These models work well for popular items but struggle when interactions are scarce, because an item with few interactions has little signal from which to learn its embedding. A common fix is to add \emph{side information}: attributes of the item such as its genre, director or cast. Knowledge graphs (KGs) are a natural way to store such attributes, since they represent facts as triples like \emph{(Toy Story, was directed by, John Lasseter)} and connect items through shared entities.
+
+Large language models give us a new way to use this knowledge. Instead of feeding raw triples to a graph neural network, we can ask an LLM to \emph{read} a small part of the KG and write a description of the item. The description can be encoded with a sentence-embedding model and the resulting vector used as a semantic feature. CoLaKG~\cite{cui2025colakg} follows exactly this idea: it builds a subgraph around each movie, asks an LLM to comprehend it, encodes the answer with SimCSE~\cite{gao2021simcse} and fuses the semantic vector into a LightGCN-style recommender~\cite{he2020lightgcn}. It also uses the semantic vectors to find similar items and aggregates information from them.
+
+In CoLaKG, as in most LLM-enhanced recommenders, the text that ends up in the model is produced by one fixed prompt and one fixed subgraph recipe. This is a natural place to ask questions from a natural language processing point of view. Does giving the LLM more of the graph help, or does it just produce longer, noisier text? Does the \emph{style} of the instruction matter, for example asking the model to first list the relevant entities, as in chain-of-thought prompting~\cite{wei2022cot}? And does the LLM actually stay faithful to the facts it is given? In this project we study these questions in a controlled way. We reuse the original CoLaKG implementation without modification and change only the context and the prompt given to the LLM. Concretely, we address the following research questions:
+\begin{enumerate}[label=\textbf{RQ\arabic*}, leftmargin=3em]
+    \item \textbf{Context depth.} Does adding two-hop KG facts (H2) to the direct facts (H1) improve recommendation accuracy?
+    \item \textbf{Prompt strategy.} Compared with a generic description prompt (P1), does an extract-then-describe prompt (P2) or a recommendation-oriented prompt (P3) improve accuracy?
+    \item \textbf{Interaction.} Does the effect of context depth depend on the prompt, i.e.\ is there an interaction between H and P?
+    \item \textbf{Context filtering.} Does a filtered two-hop context (H3), which removes generic hub attributes and keeps only role-matched director and actor links, do better than the unfiltered two-hop context?
+    \item \textbf{Grounding.} How much of the supplied context does the generated text mention, and how often does it mention known entities that were \emph{not} supplied?
+\end{enumerate}
+
+\paragraph{Contributions.} The CoLaKG model, its semantic fusion and its neighbour aggregation are prior work by \citet{cui2025colakg}; we do not claim them. Our contributions are:
+\begin{itemize}
+    \item a reproducible $3\times3$ experimental design that isolates the LLM input (context and prompt) while keeping the recommender, data split, encoder and user representations fixed;
+    \item a deterministic KG context builder with three strategies, including a simple hub-aware filter (H3) motivated by an inspection of the KG degree distribution;
+    \item an evaluation that combines ranking accuracy with two text-level views: grounding proxies for the generated descriptions and an intrinsic analysis of the embedding space;
+    \item a cached, fingerprinted pipeline in which every table and figure of this paper is regenerated from saved artifacts by a single command.
+\end{itemize}
+
+The rest of the paper is organised as follows. Section~\ref{sec:background} introduces the necessary background. Section~\ref{sec:data} describes the dataset and the knowledge graph. Section~\ref{sec:method} presents CoLaKG and our context and prompt strategies, and Section~\ref{sec:setup} the experimental protocol. Results, discussion and limitations follow in Sections~\ref{sec:results}--\ref{sec:limitations}.
 
 \section{Background and Related Work}
 \label{sec:background}
+\subsection{Collaborative Filtering and Implicit Feedback}
+Let $\mathcal{U}$ be the set of users and $\mathcal{I}$ the set of items. In the \emph{implicit feedback} setting we only observe which items a user interacted with, not how much they liked them. We denote the training interactions of user $u$ by $\mathcal{I}_u^{+}\subseteq\mathcal{I}$. A model assigns a score $\hat{y}_{ui}$ to every user--item pair and recommends the items with the highest scores. In embedding-based models the score is the inner product $\hat{y}_{ui}=\mathbf{e}_u^\top\mathbf{e}_i$ of a user embedding and an item embedding.
+
+Since there are no negative labels, such models are usually trained with \emph{Bayesian Personalized Ranking} (BPR)~\cite{rendle2009bpr}. For a user $u$, an observed item $i$ and a sampled unobserved item $j$, BPR asks that $i$ be scored above $j$:
+\begin{equation}
+\label{eq:bpr}
+\mathcal{L}_{\text{BPR}} = -\sum_{(u,i,j)} \ln \sigma\!\left(\hat{y}_{ui}-\hat{y}_{uj}\right) + \lambda\,\lVert\Theta\rVert_2^2,
+\end{equation}
+where $\sigma$ is the logistic sigmoid, $\Theta$ are the model parameters and $\lambda$ is the regularisation strength. Note that $-\ln\sigma(x)=\mathrm{softplus}(-x)$, which is how the loss is implemented in practice.
+
+\subsection{Graph-Based Collaborative Filtering}
+The interactions can be viewed as a bipartite graph between users and items. LightGCN~\cite{he2020lightgcn} learns embeddings by repeatedly averaging each node's embedding with its neighbours', without any non-linearity or weight matrices:
+\begin{equation}
+\label{eq:lightgcn}
+\mathbf{E}^{(l+1)} = \tilde{\mathbf{A}}\,\mathbf{E}^{(l)}, \qquad
+\tilde{\mathbf{A}} = \mathbf{D}^{-1/2}\mathbf{A}\,\mathbf{D}^{-1/2}, \qquad
+\mathbf{E} = \frac{1}{L+1}\sum_{l=0}^{L}\mathbf{E}^{(l)},
+\end{equation}
+where $\mathbf{A}$ is the adjacency matrix of the user--item graph, $\mathbf{D}$ its degree matrix and $L$ the number of layers. After $L$ layers each embedding contains information from its $L$-hop neighbourhood. CoLaKG uses LightGCN as its backbone.
+
+\subsection{Knowledge-Graph-Aware Recommendation}
+A knowledge graph $\mathcal{G}=\{(h,r,t)\}$ is a set of triples, each connecting a head entity $h$ to a tail entity $t$ through a relation $r$. KGAT~\cite{wang2019kgat} merges the KG with the interaction graph and propagates embeddings over both with attention. KGIN~\cite{wang2021kgin} models user intents as combinations of KG relations. These models use the KG \emph{structurally}: entities and relations get learned embeddings, and the model never sees their names. This means the meaning carried by the names themselves (that ``Pixar'' and ``animation'' are related, for example) is lost unless the graph happens to encode it.
+
+\subsection{Large Language Models for Recommendation}
+LLMs have read enormous amounts of text and therefore carry world knowledge about movies, books and music. Several recent works use them as a \emph{knowledge source} for a conventional recommender rather than as the recommender itself. KAR~\cite{xi2024kar} asks an LLM for reasoning about user preferences and factual knowledge about items and injects the encoded answers into a CTR model. RLMRec~\cite{ren2024rlmrec} aligns collaborative embeddings with LLM-generated profiles of users and items. LLMRec~\cite{wei2024llmrec} uses an LLM to augment the interaction graph and item attributes. CoLaKG~\cite{cui2025colakg}, the model we build on, gives the LLM a KG subgraph around each item and asks it to ``complete the missing knowledge'', summarise the item and describe who might like it. In all of these systems the prompt is designed once by the authors; the effect of prompt and context design on the downstream recommender is rarely studied on its own, which is the focus of this project.
+
+\subsection{Prompting and Grounding}
+The same model can produce very different outputs depending on the instruction. Chain-of-thought prompting~\cite{wei2022cot} shows that asking a model to write out intermediate steps before the answer can improve reasoning. Our P2 prompt borrows this idea in a lightweight form: the model first lists the relevant attributes, entities and relationships and then writes the description. A related concern is \emph{hallucination}, i.e.\ text that is fluent but not supported by the input~\cite{ji2023hallucination}. When an LLM describes an item from a KG, hallucinated facts become noise in the item embedding. All our prompts therefore contain an explicit grounding instruction, and we measure grounding with simple proxies (Section~\ref{sec:setup}).
+
+\subsection{Sentence Embeddings}
+To use the generated text in a recommender, it must be turned into a fixed-size vector. SimCSE~\cite{gao2021simcse} fine-tunes a pretrained encoder, here RoBERTa-large~\cite{liu2019roberta}, with a contrastive objective. In the supervised variant, a sentence $x_i$ is pulled towards an entailed sentence $x_i^{+}$ and pushed away from a contradiction $x_i^{-}$ and from the other sentences in the batch:
+\begin{equation}
+\label{eq:simcse}
+\ell_i = -\log \frac{e^{\mathrm{sim}(\mathbf{h}_i,\mathbf{h}_i^{+})/\tau}}{\sum_{j=1}^{N}\left(e^{\mathrm{sim}(\mathbf{h}_i,\mathbf{h}_j^{+})/\tau}+e^{\mathrm{sim}(\mathbf{h}_i,\mathbf{h}_j^{-})/\tau}\right)},
+\end{equation}
+where $\mathrm{sim}$ is cosine similarity and $\tau$ a temperature. The result is an embedding space in which cosine similarity reflects semantic similarity. We use the released \texttt{sup-simcse-roberta-large} checkpoint without further training, exactly as CoLaKG does, so any change in the item vectors comes from the text alone.
 
 \section{Data and Knowledge Graph}
 \label{sec:data}
+\subsection{MovieLens-1M}
+We use MovieLens-1M~\cite{harper2015movielens}, a standard benchmark of movie ratings collected by the MovieLens website, in the preprocessed form released with CoLaKG. Ratings are treated as implicit feedback: a rating means an interaction, regardless of its value. The released version contains 6,040 users and 3,260 items with at least one training interaction, split into 801,218 training and 197,321 test interactions. With $998{,}539$ interactions in total, the density of the user--item matrix is about $998{,}539/(6{,}040\times3{,}260)\approx5.07\%$. We keep this split exactly as released and never create a new one, so that our numbers are comparable to the original CoLaKG setup.
+
+In addition to the interactions, the release provides a metadata file for 3,883 movies. It combines the original MovieLens title and genres with extra fields collected from the web: director, cast list, genres, language and release date. This is the only input to our knowledge graph. Because there are more movies in the metadata than in the recommender catalogue, some KG facts point to movies that are never recommended; they can still appear as two-hop context.
+
+\paragraph{Item indexing.} A movie's MovieLens identifier (\emph{MovieID}) is not its row in the recommender's embedding matrix. The release includes a mapping file from MovieID to a contiguous item index; for example \emph{Toy Story (1995)} has MovieID~1 but item index~34. Every generated vector is written to the row given by this mapping, and every assembled tensor is saved with an explicit row-mapping file. Getting this wrong would silently assign one movie's description to another movie, so the pipeline checks the mapping before training.
+
+\subsection{Knowledge Graph Construction}
+We reconstruct the KG from the metadata following the released CoLaKG preprocessing. For each movie $m$ we add three kinds of facts:
+\begin{itemize}
+    \item \textbf{Director:} $(m,\ \textit{was directed by},\ d)$ for its director $d$;
+    \item \textbf{Actors:} $(m,\ \textit{stars},\ a)$ for each of its first three listed actors $a$;
+    \item \textbf{Genres:} $(m,\ \textit{has genre},\ g)$ if the movie has a single genre. Otherwise, one triple
+    $(m,\ \textit{has genres},\ \text{``}g_1 \text{ and } g_2\text{''})$
+    for every unordered pair $\{g_1,g_2\}$ of its genres.
+\end{itemize}
+Every fact is also added in the reverse direction (\textit{directed}, \textit{starred in}, \textit{is the genre of}, \textit{are the genres of}), so that we can walk from an attribute back to other movies. This gives eight relation types. Movie nodes are identified by MovieID, not by title, so two different movies with the same title are never merged. Attribute nodes are identified by name, which means that a person who both directs and acts is a single node. Source Code~\ref{lst:build-kg} shows the construction.
+
+\begin{lstlisting}[caption={Knowledge graph construction (from \texttt{scripts/experiment.py}, lightly trimmed)}, label={lst:build-kg}]
+def build_kg(rows):
+    labels, edges = {}, set()
+    for row in rows:
+        movie = f"movie:{row['MovieID']}"
+        labels[movie] = row["Title"]
+        genres = sorted(set((row["genres"] or "unknown").split("|")))
+        actors = (row["actors"] or "unknown").split("|")[:3]
+        attributes = [("was directed by", "directed",
+                       row["director"] or "unknown")]
+        attributes += [("stars", "starred in", a) for a in actors]
+        if len(genres) == 1:
+            attributes += [("has genre", "is the genre of", genres[0])]
+        else:
+            attributes += [("has genres", "are the genres of", " and ".join(p))
+                           for p in combinations(genres, 2)]
+        for relation, inverse, name in attributes:
+            entity = f"entity:{name}"
+            labels[entity] = name
+            edges.add((movie, relation, entity))  # forward fact
+            edges.add((entity, inverse, movie))   # reverse fact
+    adjacency = defaultdict(list)
+    for head, relation, tail in sorted(edges):
+        adjacency[head].append((head, relation, tail))
+    return labels, adjacency
+\end{lstlisting}
+
+Table~\ref{tab:kg_stats} summarises the resulting graph. These statistics differ from the KG statistics reported in the CoLaKG paper, since we rebuild the graph from the released metadata rather than using the authors' intermediate files. We report our own numbers and use them consistently throughout.
+
+\gentable{kg_stats}
+
+\subsection{Hub Attributes}
+Not all attributes carry the same amount of information. Figure~\ref{fig:degree_distribution} shows the degree distribution of attribute nodes, i.e.\ how many movies each attribute is connected to. Most actors and directors appear in only a handful of movies, but genre pairs are \emph{hubs}: a single node such as ``Drama and Romance'' connects hundreds of movies (Table~\ref{tab:kg_top}). The placeholder value ``unknown'', used when a field is missing, also becomes a hub that links unrelated movies. A two-hop walk through such a hub reaches movies that share almost nothing with the target, so including these paths in the LLM's context is likely to add noise rather than information. This observation motivates the filtered context strategy H3 in Section~\ref{sec:contexts}.
+
+\genfigure{degree_distribution}{Degree distribution of attribute nodes in the reconstructed KG (log--log). Genre and genre-pair nodes form a heavy tail of hubs}
+\gentable{kg_top}
 
 \section{Method}
 \label{sec:method}
