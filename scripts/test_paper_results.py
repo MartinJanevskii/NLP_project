@@ -38,4 +38,42 @@ with tempfile.TemporaryDirectory() as folder:
     pr.text_stats(empty_run, pilot=True)
     for name in ("main_results", "contrasts", "text_stats"):
         assert "Pending:" in (pr.OUT / f"{name}.tex").read_text(), name
+    # Outputs of an earlier run never survive into a later one.
+    (pr.OUT / "heatmap_ndcg20.pdf").write_text("stale")
+    pr.clear_outputs()
+    assert not [p for p in pr.OUT.iterdir() if p.suffix in (".tex", ".pdf")]
+    # Qualitative examples fall back to whichever configurations exist.
+    partial = Path(folder) / "partial"
+    partial.mkdir()
+    columns = [
+        "configuration",
+        "item_id",
+        "triples",
+        "entities",
+        "context_characters",
+        "prompt_characters",
+        "response_words",
+        "entity_coverage",
+        "unsupported_known_entities",
+        "input_tokens",
+        "output_tokens",
+    ]
+    (partial / "text_analysis.csv").write_text(
+        ",".join(columns) + "\nH1P2,0,5,6,397,669,24,1.0,0,186,39\n"
+    )
+    (partial / "qualitative.json").write_text(
+        '[{"configuration": "H1P2", "title": "Heat (1995)", "response": "A **crime** film."}]'
+    )
+    pr.text_stats(partial, pilot=False)
+    assert r"\item[H1P2] A crime film." in (pr.OUT / "qualitative.tex").read_text()
+    # Full runs get a short reference-row label that fits the page width.
+    (partial / "aggregated.csv").write_text(
+        "configuration,"
+        + ",".join(f"{m}_{s}" for m in pr.METRICS for s in ("mean", "std"))
+        + "\nH1P1,"
+        + ",".join(["0.1"] * 8)
+        + "\n"
+    )
+    pr.results(partial, pilot=False)
+    assert "CoLaKG (orig.)" in (pr.OUT / "main_results.tex").read_text()
 print("paper_results helper checks passed")

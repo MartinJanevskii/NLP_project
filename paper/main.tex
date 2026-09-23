@@ -120,7 +120,7 @@ Since there are no negative labels, such models are usually trained with \emph{B
 \label{eq:bpr}
 \mathcal{L}_{\text{BPR}} = -\sum_{(u,i,j)} \ln \sigma\!\left(\hat{y}_{ui}-\hat{y}_{uj}\right) + \lambda\,\lVert\Theta\rVert_2^2,
 \end{equation}
-where $\sigma$ is the logistic sigmoid, $\Theta$ are the model parameters and $\lambda$ is the regularisation strength. Note that $-\ln\sigma(x)=\mathrm{softplus}(-x)$, which is how the loss is implemented in practice.
+where $\sigma$ is the logistic sigmoid, $\Theta$ are the model parameters and $\lambda$ is the regularisation strength. Note that $-\ln\sigma(x)=\mathrm{softplus}(-x)$, which is how the loss is implemented in practice; implementations such as the one we use average the loss over a mini-batch and regularise only the embeddings of the users and items in that batch.
 
 \subsection{Graph-Based Collaborative Filtering}
 The interactions can be viewed as a bipartite graph between users and items. LightGCN~\cite{he2020lightgcn} learns embeddings by repeatedly averaging each node's embedding with its neighbours', without any non-linearity or weight matrices:
@@ -322,7 +322,7 @@ By construction $\mathcal{C}_1(m)\subseteq\mathcal{C}_3(m)\subseteq\mathcal{C}_2
   \foreach \n in {bug, ts2} \draw[h3] (dir) -- (\n);
   \foreach \n in {splash, thing} \draw[h3] (hanks) -- (\n);
   \foreach \n in {santa, rich} \draw[h3] (allen) -- (\n);
-  \foreach \x/\lab [count=\k] in {-5.2/Aladdin, -2.6/Chicken Run, 2.6/Antz, 5.2/The Iron Giant} {
+  \foreach \x/\lab [count=\k] in {-5.2/Aladdin, -2.6/Chicken Run, 2.6/Space Jam, 5.2/The Aristocats} {
     \node[movie, text=gray] (g\k) at (\x,-3.2) {\lab};
     \draw[h2] (genre) -- (g\k);
   }
@@ -333,7 +333,7 @@ By construction $\mathcal{C}_1(m)\subseteq\mathcal{C}_3(m)\subseteq\mathcal{C}_2
     \draw[h2] (0,-0.8) -- (0.6,-0.8) node[right, black] {two-hop, H2 only};
   \end{scope}
 \end{tikzpicture}
-\caption{The three context strategies for \emph{Toy Story (1995)} (simplified: one of the three genre-pair nodes and one of the three actors are omitted). H1 contains the solid black edges. H2 adds up to ten sampled two-hop edges per attribute, including many through genre hubs (dashed). H3 keeps only role-matched director and actor paths (green) and removes genre bridges.}
+\caption{The three context strategies for \emph{Toy Story (1995)} (simplified: two of the three genre-pair nodes and one of the three actors are omitted). H1 contains the solid black edges. H2 adds up to ten sampled two-hop edges per attribute, including many through genre hubs (dashed). H3 keeps only role-matched director and actor paths (green) and removes genre bridges.}
 \label{fig:neighbourhood}
 \end{figure}
 
@@ -441,12 +441,12 @@ RQ1 is the average effect of depth, RQ2 the average effect of the prompt, and RQ
 
 \subsection{Grounding Proxies}
 \label{sec:grounding-metrics}
-To measure how faithful the generated text is to its context (RQ5), let $\mathcal{E}(c)$ be the set of entity names that appear in the context of an item (heads and tails of its triples) and $\mathcal{V}$ the set of all entity names in the KG. We find the names from $\mathcal{V}$ that appear in the response as whole words (case-insensitive, ignoring names of two characters or fewer and ``unknown''), and call this set $\mathcal{M}$. We then compute
+To measure how faithful the generated text is to its context (RQ5), let $\mathcal{V}$ be the set of all entity names in the KG and $\mathcal{E}(c)$ the names that appear in the context of an item (heads and tails of its triples). Names of two characters or fewer and the placeholder ``unknown'' are ignored in both sets. We find the names from $\mathcal{V}$ that appear in the response as whole words (case-insensitive) and call this set $\mathcal{M}$. We then compute
 \begin{equation}
 \text{coverage} = \frac{|\mathcal{M}\cap\mathcal{E}(c)|}{|\mathcal{E}(c)|}, \qquad
 \text{unsupported} = |\mathcal{M}\setminus\mathcal{E}(c)|.
 \end{equation}
-Coverage tells us how much of the supplied information the description uses; the unsupported count is the number of \emph{known} KG entities the response mentions without being given them. These are cheap proxies with clear limits. Exact matching misses aliases and paraphrases (``Hanks'' for ``Tom Hanks''), cannot see invented entities that are not in the KG at all, and produces false matches for short or common titles (a movie called \emph{Heat} matches the word ``heat''). The unsupported count is therefore \emph{not} a hallucination rate; it is best read as a relative signal between configurations.
+Coverage tells us how much of the supplied information the description uses (it is $0$ if the context has no eligible names); the unsupported count is the number of \emph{known} KG entities the response mentions without being given them. These are cheap proxies with clear limits. Exact matching misses aliases and paraphrases (``Hanks'' for ``Tom Hanks'') and cannot see invented entities that are not in the KG at all. More importantly, the KG vocabulary contains single-genre nodes such as ``Drama'' or ``Family'' (from single-genre movies), while the context of a multi-genre movie contains only pair nodes such as ``Animation and Family''. A description that simply says ``a family film'' is therefore counted as mentioning an unsupported entity, even though the genre was supplied. In our pilot outputs almost all unsupported mentions are such genre words. The unsupported count is therefore \emph{not} a hallucination rate; it mostly measures how a response phrases genres and is best read as a relative signal between configurations.
 
 \subsection{Embedding-Space Analysis}
 Recommendation metrics depend on the whole training process. To look at the item vectors directly, we measure whether items that are close in the semantic space share KG attributes. For a kind of attribute $\kappa\in\{\text{director}, \text{actor}, \text{genre set}\}$, let $A_\kappa(i)$ be item $i$'s attributes of that kind and $\mathrm{NN}_k(i)$ its $k=10$ nearest items by cosine similarity. The neighbour agreement is
@@ -519,7 +519,7 @@ Our study has several limitations that should be kept in mind when reading the r
 \begin{itemize}
     \item \textbf{One dataset, one generator, one encoder.} All experiments use MovieLens-1M, a single LLM and a single sentence encoder. Movie metadata is rich and well known to LLMs; the conclusions may not transfer to domains with sparser or less familiar knowledge, or to other models.
     \item \textbf{Three seeds.} Three seeds are enough to see the order of magnitude of the run-to-run spread but not to test significance. A stronger analysis would compare configurations per user with a paired test (e.g.\ a Wilcoxon signed-rank test on per-user NDCG), which requires logging per-user scores. We did not add this, because changing the training wrapper would invalidate the fingerprints of already completed runs; it is the most important piece of future work.
-    \item \textbf{Proxy grounding metrics.} As explained in Section~\ref{sec:grounding-metrics}, exact name matching misses aliases and invented entities and produces false matches for common words. A proper evaluation would use entity linking or human annotation of a sample of descriptions.
+    \item \textbf{Proxy grounding metrics.} As explained in Section~\ref{sec:grounding-metrics}, exact name matching misses aliases and invented entities, and the unsupported count is dominated by single-genre words that the pair-based genre nodes do not match. A proper evaluation would use entity linking or human annotation of a sample of descriptions.
     \item \textbf{Reconstructed knowledge graph.} Our KG is rebuilt from the released metadata and its statistics differ from those reported for CoLaKG. Both our configurations and our comparisons use the same graph, but absolute numbers are not directly comparable with the original paper.
     \item \textbf{A hand-designed filter.} H3 is a heuristic based on one inspection of the degree distribution. Learned or relevance-based subgraph selection (for example, choosing two-hop neighbours that users actually co-consume) could work better.
     \item \textbf{Fixed user representations.} Only item descriptions change; the user profiles are the published ones, generated with the original prompt. A mismatch between the style of new item descriptions and old user profiles could hide some effects.

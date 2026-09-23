@@ -67,6 +67,13 @@ def table(name, caption, header, rows, align=None, tag=True):
     (OUT / f"{name}.tex").write_text("\n".join(lines) + "\n")
 
 
+def clear_outputs():
+    """Remove an earlier run's files so stale figures never reach the paper."""
+    for path in OUT.glob("*"):
+        if path.suffix in (".tex", ".pdf"):
+            path.unlink()
+
+
 def pending(name, caption, reason):
     table(
         name,
@@ -305,6 +312,9 @@ def results(run, pilot):
 
     summary = {r["configuration"]: r for r in read_csv(run / "aggregated.csv")}
     caption = "Recommendation accuracy per configuration (mean $\\pm$ sample SD over three seeds)"
+    caption += "; bold: best of the nine configurations"
+    if not pilot:
+        caption += "; CoLaKG (orig.): published embeddings, seed 2020"
     if not summary:
         pending("main_results", caption, "no configuration has three completed seeds")
     else:
@@ -325,7 +335,7 @@ def results(run, pilot):
             baseline = load_manifest(ROOT / "artifacts/EXPERIMENT_MANIFEST.json")[
                 "baseline"
             ]
-            label = "CoLaKG (published embeddings, seed 2020)"
+            label = "CoLaKG (orig.)"
             if baseline.get("status") == "COMPLETE":
                 rows.append(
                     [label] + [f"{baseline['metrics'][m]:.4f}" for m in METRICS]
@@ -478,11 +488,11 @@ def text_stats(run, pilot):
     )
     if examples:
         title = examples[0]["title"]
+        same = [e for e in examples if e["title"] == title]
+        # Prefer the diagonal H1P1/H2P2/H3P3; partial runs show what exists.
         chosen = [
-            e
-            for e in examples
-            if e["title"] == title and e["configuration"] in ("H1P1", "H2P2", "H3P3")
-        ]
+            e for e in same if e["configuration"] in ("H1P1", "H2P2", "H3P3")
+        ] or same[:3]
         lines = [r"\begin{description}[style=nextline]"]
         for e in chosen:
             words = plain(e["response"]).split()
@@ -591,6 +601,7 @@ def main():
 
         report(run)
     OUT.mkdir(parents=True, exist_ok=True)
+    clear_outputs()
     manifest = read_json(run / "manifest.json")
     pilot = manifest["purpose"] == "engineering_only"
     with (DATA / "ml1m_extended_movie.csv").open() as file:
