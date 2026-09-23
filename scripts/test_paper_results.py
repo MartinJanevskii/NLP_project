@@ -16,13 +16,19 @@ assert pr.neighbour_agreement(close, [{"a"}, {"b"}, {"a"}, {"b"}], k=1) == 0.0
 keys = pr.movie_keys(
     {"director": "unknown", "actors": "A|B|C|D", "genres": "Drama|Comedy", "Genres": ""}
 )
-assert keys == {"director": set(), "actor": {"A", "B", "C"}, "genre set": {"Comedy|Drama"}}
+assert keys == {
+    "director": set(),
+    "actor": {"A", "B", "C"},
+    "genre set": {"Comedy|Drama"},
+}
 with tempfile.TemporaryDirectory() as folder:
     pr.OUT = Path(folder)
     pr.table("t", "Cap", ["A", "B"], [["x", 1]])
     text = (pr.OUT / "t.tex").read_text()
     assert r"\caption{Cap\RunTag}" in text and r"x & 1 \\" in text
     assert r"\label{tab:t}" in text
+    pr.table("u", "Cap", ["A"], [["x"]], tag=False)
+    assert r"\caption{Cap}" in (pr.OUT / "u.tex").read_text()
     pr.pending("p", "Cap", "no seeds")
     assert "Pending: no seeds" in (pr.OUT / "p.tex").read_text()
     # A run with no completed seeds or responses yields pending tables, not a crash.

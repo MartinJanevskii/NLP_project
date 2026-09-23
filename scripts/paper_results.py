@@ -41,8 +41,11 @@ def plain(markdown):
     return " ".join(text.split())
 
 
-def table(name, caption, header, rows, align=None):
-    """Header and rows are LaTeX already; callers tex() free text."""
+def table(name, caption, header, rows, align=None, tag=True):
+    """Header and rows are LaTeX already; callers tex() free text.
+
+    tag=False for run-independent tables (KG and context statistics).
+    """
     align = align or "l" + "r" * (len(header) - 1)
     lines = [
         r"\begin{table}[H]",
@@ -57,7 +60,7 @@ def table(name, caption, header, rows, align=None):
     lines += [
         r"\bottomrule",
         r"\end{tabular}",
-        rf"\caption{{{caption}\RunTag}}",
+        rf"\caption{{{caption}\RunTag}}" if tag else rf"\caption{{{caption}}}",
         rf"\label{{tab:{name}}}",
         r"\end{table}",
     ]
@@ -177,6 +180,7 @@ def kg_tables(labels, adjacency):
         "Statistics of the reconstructed MovieLens knowledge graph",
         ["Quantity", "Value"],
         rows,
+        tag=False,
     )
     degree = {
         e: len(edges) for e, edges in adjacency.items() if e.startswith("entity:")
@@ -193,6 +197,7 @@ def kg_tables(labels, adjacency):
         ["Attribute", "Type", "Degree"],
         [[tex(labels[e]), kind[e], degree[e]] for e in top],
         "llr",
+        tag=False,
     )
     fig, ax = plt.subplots(figsize=(7, 3.5))
     # Integer-aligned log bins, so degrees 1, 2, 3 each get their own bar.
@@ -262,6 +267,7 @@ def context_sizes(mapping, labels, adjacency):
             "Characters (mean)",
         ],
         rows,
+        tag=False,
     )
     fig, ax = plt.subplots(figsize=(7, 3.5))
     ax.boxplot(
@@ -289,6 +295,7 @@ def context_sizes(mapping, labels, adjacency):
         ["Part", "Triple"],
         rows,
         "lp{11cm}",
+        tag=False,
     )
 
 
