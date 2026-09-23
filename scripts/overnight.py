@@ -22,6 +22,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from experiment import (
@@ -79,6 +80,54 @@ for _p in ("P2", "P3"):
     ]
 for _p in ("P1", "P2", "P3"):
     CONTRASTS[f"RQ4_H3_minus_H2_{_p}"] = [("H3" + _p, 1), ("H2" + _p, -1)]
+
+
+# ---- robust generation ----------------------------------------------------------
+
+
+def generate_robust(endpoint, payload, key, cache, attempts=4, pause=5.0):
+    """llm_subset.generate with retries; a response cut at max_tokens is kept, flagged.
+
+    At temperature 0 a length-capped answer repeats on retry, so it is saved with
+    truncated=True (reported per configuration) instead of stopping the run.
+    """
+    last = None
+    for attempt in range(attempts):
+        try:
+            return generate(endpoint, payload, key, cache)
+        except (ValueError, URLError, TimeoutError, OSError) as error:
+            last = error
+            time.sleep(pause * (attempt + 1))
+    identity = request_id(endpoint, payload)
+    request = Request(
+        endpoint,
+        data=json.dumps(payload).encode(),
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    )
+    try:
+        with urlopen(request, timeout=120) as response:
+            result = json.load(response)
+        choice = result["choices"][0]
+        text = choice["message"]["content"]
+    except (URLError, TimeoutError, OSError, KeyError, ValueError):
+        text, choice, result = None, {}, {}
+    if (
+        choice.get("finish_reason") == "length"
+        and isinstance(text, str)
+        and text.strip()
+    ):
+        saved = {
+            "request_id": identity,
+            "text": text,
+            "usage": result.get("usage"),
+            "model": result.get("model", payload["model"]),
+            "endpoint": endpoint,
+            "finish_reason": "length",
+            "truncated": True,
+        }
+        atomic_json(cache / f"{identity}.json", saved)
+        return saved
+    raise RuntimeError(f"Generation failed after {attempts} attempts: {last}")
 
 
 # ---- dataset derivation -----------------------------------------------------------
@@ -268,6 +317,12 @@ def analyse(run):
                 )
             }
             for c, v in text.items()
+        },
+        "truncated_responses": {
+            c: sum(
+                bool(r.get("truncated")) for r in read_json(run / c / "responses.json")
+            )
+            for c in CONFIGS
         },
         "status": read_json(run / "status.json"),
     }
@@ -615,7 +670,9 @@ def run_all(run, key):
                     zip(
                         unique,
                         pool.map(
-                            lambda p: generate(ENDPOINT, p, key, base / "responses"),
+                            lambda p: generate_robust(
+                                ENDPOINT, p, key, base / "responses"
+                            ),
                             unique.values(),
                         ),
                     )

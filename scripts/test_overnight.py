@@ -123,3 +123,55 @@ with tempfile.TemporaryDirectory() as folder:
     (run / "status.json").write_text(json.dumps(status))
     assert "STALE" in ov.status_text(run)
 print("overnight data, statistics and progress checks passed")
+
+# ---- robust generation against a local fake provider -------------------------------
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+replies = []
+
+
+class Fake(BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers["Content-Length"]))
+        code, finish, text = replies.pop(0)
+        body = json.dumps(
+            {
+                "choices": [{"finish_reason": finish, "message": {"content": text}}],
+                "model": "fake",
+                "usage": {},
+            }
+        ).encode()
+        self.send_response(code)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+server = HTTPServer(("127.0.0.1", 0), Fake)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+endpoint = f"http://127.0.0.1:{server.server_port}/v1/chat/completions"
+with tempfile.TemporaryDirectory() as folder:
+    cache = Path(folder)
+    payload = {"model": "m", "messages": [{"role": "user", "content": "x"}]}
+    replies[:] = [(500, "stop", ""), (200, "stop", ""), (200, "stop", "fine")]
+    assert ov.generate_robust(endpoint, payload, "k", cache, pause=0)["text"] == "fine"
+    payload2 = {"model": "m", "messages": [{"role": "user", "content": "y"}]}
+    replies[:] = [(200, "length", "cut off")] * 5
+    saved = ov.generate_robust(endpoint, payload2, "k", cache, pause=0)
+    assert saved["text"] == "cut off" and saved["truncated"] is True
+    replies[:] = []  # cached now: no request may be sent
+    assert (
+        ov.generate_robust(endpoint, payload2, "k", cache, pause=0)["truncated"] is True
+    )
+    payload3 = {"model": "m", "messages": [{"role": "user", "content": "z"}]}
+    replies[:] = [(500, "stop", "")] * 5
+    try:
+        ov.generate_robust(endpoint, payload3, "k", cache, pause=0)
+        raise AssertionError("persistent failures must raise")
+    except RuntimeError as error:
+        assert "after 4 attempts" in str(error)
+server.shutdown()
+print("robust generation checks passed")
