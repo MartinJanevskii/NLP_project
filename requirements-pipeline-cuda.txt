@@ -1,0 +1,5 @@
+# Python 3.8.19 / Linux x86_64. Original encoder versions plus plot generation.
+-r requirements-baseline-cuda.txt
+transformers==4.44.0
+huggingface-hub==0.24.5
+matplotlib==3.7.5
