@@ -1,0 +1,119 @@
+\documentclass[a4paper,11pt]{article}
+\usepackage{geometry}
+\geometry{margin=2.54cm}
+\usepackage{iftex}
+\ifXeTeX
+  \usepackage{fontspec}
+\else
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+\fi
+\usepackage[english]{babel}
+% Tables and figures
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage[table]{xcolor}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{enumitem}
+% Math
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{bm}
+% Diagrams
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,fit,shapes.geometric,backgrounds,calc}
+% Code
+\usepackage{listings}
+% References
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+
+% Code formatting
+\renewcommand{\lstlistingname}{Source Code}
+\definecolor{codebg}{RGB}{230, 240, 255}
+\definecolor{keywordblue}{RGB}{0, 70, 140}
+\definecolor{commentblue}{RGB}{100, 130, 180}
+\definecolor{stringblue}{RGB}{0, 100, 180}
+\lstset{
+  backgroundcolor=\color{codebg},
+  language=Python,
+  basicstyle=\ttfamily\footnotesize\color{black},
+  keywordstyle=\color{keywordblue}\bfseries,
+  commentstyle=\color{commentblue}\itshape,
+  stringstyle=\color{stringblue},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  numbersep=8pt,
+  frame=single,
+  rulecolor=\color{keywordblue},
+  breaklines=true,
+  tabsize=4,
+  captionpos=b,
+  showspaces=false,
+  showstringspaces=false
+}
+
+% Generated results: every measured number comes from scripts/paper_results.py
+\newif\ifpilotrun
+\def\RunTag{}\def\RunName{none}\def\RunItems{--}\def\RunEpochs{--}
+\InputIfFileExists{generated/run_info.tex}{}{}
+\newcommand{\todo}[1]{\textcolor{red!70!black}{\textbf{[TODO:} #1\textbf{]}}}
+\newcommand{\placeholder}[2][0.9]{%
+  \begin{center}\fcolorbox{gray}{gray!8}{\parbox[c][4cm][c]{#1\linewidth}{\centering\textit{Image placeholder: #2}}}\end{center}}
+\newcommand{\gentable}[1]{%
+  \InputIfFileExists{generated/#1.tex}{}{\placeholder{run scripts/paper\_results.py to generate table \texttt{\detokenize{#1}}}}}
+\newcommand{\genfigure}[3][0.85]{%
+  \begin{figure}[H]\centering
+  \IfFileExists{generated/#2.pdf}{\includegraphics[width=#1\linewidth]{generated/#2.pdf}}{\placeholder{run scripts/paper\_results.py to generate \texttt{\detokenize{#2}}}}
+  \caption{#3\RunTag}\label{fig:#2}\end{figure}}
+
+\title{Knowledge Graph Context Meets Prompt Design:\\ How the Information Given to an LLM Shapes Item Semantics in Recommendation}
+\author{Martin Janevski \quad Viktor Hristovski \quad David Dukoski\\[4pt]
+\small Faculty of Computer Science and Engineering (FINKI)\\
+\small Ss.\ Cyril and Methodius University in Skopje\\
+\small Natural Language Processing course project}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+We build on CoLaKG~\cite{cui2025colakg}.
+
+\section{Background and Related Work}
+\label{sec:background}
+
+\section{Data and Knowledge Graph}
+\label{sec:data}
+
+\section{Method}
+\label{sec:method}
+
+\section{Experimental Setup}
+\label{sec:setup}
+
+\section{Results}
+\label{sec:results}
+\gentable{main_results}
+\genfigure{heatmap_ndcg20}{NDCG@20 per configuration}
+
+\section{Discussion}
+\label{sec:discussion}
+
+\section{Limitations and Future Work}
+\label{sec:limitations}
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}
