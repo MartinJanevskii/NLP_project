@@ -325,7 +325,7 @@ def main():
                 for name in ("recall", "ndcg")
                 for i, k in enumerate((10, 20))
             }
-        else:
+        elif not args.reduced:  # reduced mode already trained this epoch above
             BPR_train_original(dataset, model, bpr, epoch)
         checkpoint = {
             "fingerprint": fingerprint,
