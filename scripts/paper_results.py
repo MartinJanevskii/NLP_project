@@ -133,6 +133,16 @@ CONTRASTS = {
     "RQ4_H3_minus_H2_P2": r"RQ4: H3 $-$ H2 (P2)",
     "RQ4_H3_minus_H2_P3": r"RQ4: H3 $-$ H2 (P3)",
 }
+SHORT = {
+    "RQ1_H2_minus_H1": r"RQ1 H2$-$H1",
+    "RQ2_P2_minus_P1_over_H1_H2": r"RQ2 P2$-$P1",
+    "RQ2_P3_minus_P1_over_H1_H2": r"RQ2 P3$-$P1",
+    "RQ3_depth_effect_P2_minus_P1": r"RQ3 depth$\times$P2",
+    "RQ3_depth_effect_P3_minus_P1": r"RQ3 depth$\times$P3",
+    "RQ4_H3_minus_H2_P1": r"RQ4 H3$-$H2 (P1)",
+    "RQ4_H3_minus_H2_P2": r"RQ4 H3$-$H2 (P2)",
+    "RQ4_H3_minus_H2_P3": r"RQ4 H3$-$H2 (P3)",
+}
 PILOT_TITLE = "ENGINEERING PILOT (not research results)"
 
 
@@ -316,7 +326,9 @@ def results(run, pilot):
     summary = {r["configuration"]: r for r in read_csv(run / "aggregated.csv")}
     caption = "Recommendation accuracy per configuration (mean $\\pm$ sample SD over three seeds)"
     caption += "; bold: best of the nine configurations"
-    if not pilot:
+    if (run / "reference").exists():
+        caption += "; CoLaKG (orig.): published embeddings, same data and seeds"
+    elif not pilot:
         caption += "; CoLaKG (orig.): published embeddings, seed 2020"
     if not summary:
         pending("main_results", caption, "no configuration has three completed seeds")
@@ -443,7 +455,7 @@ def significance(run):
         )
         body.append(
             [
-                CONTRASTS.get(r["comparison"], tex(r["comparison"])),
+                SHORT.get(r["comparison"], tex(r["comparison"])),
                 f"{float(r['mean_difference']):+.5f}",
                 f"[{float(r['ci_low']):+.5f}, {float(r['ci_high']):+.5f}]",
                 f"{float(r['p_holm']):.3g}",

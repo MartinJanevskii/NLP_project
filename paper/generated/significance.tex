@@ -1,11 +1,18 @@
 \begin{table}[H]
 \centering
 \small
-\begin{tabular}{l}
+\begin{tabular}{lrrrcl}
 \toprule
-\textbf{Status} \\
+Comparison & $\Delta$ & 95\% CI & $p_{\text{Holm}}$ & Seeds & Verdict \\
 \midrule
-\textit{Pending: no per-user results yet} \\
+RQ1 H2$-$H1 & -0.00052 & [-0.00123, +0.00015] & 0.124 & $-$$-$$-$ & inconclusive \\
+RQ2 P2$-$P1 & -0.00053 & [-0.00121, +0.00013] & 0.13 & $-$+$-$ & inconclusive \\
+RQ3 depth$\times$P2 & -0.00094 & [-0.00218, +0.00032] & 0.13 & $-$+$-$ & inconclusive \\
+RQ2 P3$-$P1 & -0.00001 & [-0.00083, +0.00079] & 1 & ++$-$ & inconclusive \\
+RQ3 depth$\times$P3 & +0.00032 & [-0.00102, +0.00163] & 1 & $-$+$-$ & inconclusive \\
+RQ4 H3$-$H2 (P1) & -0.00080 & [-0.00177, +0.00019] & 0.0239 & +$-$$-$ & inconclusive \\
+RQ4 H3$-$H2 (P2) & +0.00169 & [+0.00076, +0.00268] & 0.00368 & +++ & \textbf{supported} \\
+RQ4 H3$-$H2 (P3) & -0.00039 & [-0.00146, +0.00061] & 1 & $-$++ & inconclusive \\
 \bottomrule
 \end{tabular}
 \caption{Pre-registered per-user tests on NDCG@20: mean difference, 95\% bootstrap CI, Holm-adjusted Wilcoxon $p$, sign of the three per-seed differences, verdict\RunTag}

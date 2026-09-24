@@ -55,3 +55,18 @@ cd paper && tectonic main.tex
 On a pilot run every generated caption is marked **[ENGINEERING PILOT]**. The paper
 compiles without any run too: missing inputs show as placeholder boxes. Result-dependent
 text is marked with red `\todo{}` notes. Offline check: `.venv/bin/python scripts/test_paper_results.py`.
+
+## Overnight reduced run (Mac M4)
+
+A complete study (9 configurations + CoLaKG reference, 3 seeds) on a random 1,000-item
+subsample with a validation-chosen epoch budget; ~13 h on an M4. Resumable at any point.
+
+```sh
+uv run --no-sync --env-file .env python scripts/overnight.py check-key   # one tiny API call
+caffeinate -i uv run --no-sync --env-file .env python scripts/overnight.py run
+.venv/bin/python scripts/overnight.py status                             # from another terminal
+.venv/bin/python scripts/paper_results.py artifacts/experiments/<protocol>/overnight_<hash> --skip-report
+```
+
+Results: `findings.json` and `significance.csv` in the run folder (pre-registered per-user
+Wilcoxon tests with Holm correction). Offline checks: `.venv/bin/python scripts/test_overnight.py`.
