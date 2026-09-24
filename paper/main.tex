@@ -269,7 +269,49 @@ where $\Vert$ denotes concatenation and $\mathbf{W}\in\mathbb{R}^{1024\times32}$
 
 \paragraph{Propagation and training.} The user vectors $\mathbf{e}^{(0)}_u$ and item vectors $\hat{\mathbf{e}}^{(0)}_i$ are the input layer of a three-layer LightGCN (Equation~\ref{eq:lightgcn}) over the user--item graph. The final score is the inner product of the averaged layer outputs, and the model is trained with the BPR loss of Equation~\ref{eq:bpr}, with L2 regularisation on the ID embeddings and projected semantic vectors of the batch.
 
-\placeholder{CoLaKG architecture sketch: item semantic vector $\to$ projection and fusion $\to$ attention over the 30 semantic neighbours $\to$ LightGCN over the user--item graph $\to$ BPR loss}
+\begin{figure}[H]
+\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[
+    node distance=5mm and 6mm,
+    box/.style={draw, rounded corners=2pt, align=center, font=\scriptsize, minimum height=8mm, fill=gray!6},
+    sem/.style={box, fill=orange!15, draw=orange!70!black},
+    idb/.style={box, fill=blue!8, draw=blue!50!black},
+    op/.style={circle, draw, inner sep=1pt, font=\scriptsize, fill=white},
+    arr/.style={-{Stealth[length=1.6mm]}, thick}]
+  \node[sem] (si) {item text vector $\mathbf{s}_i$\\(SimCSE, 1024-d)};
+  \node[box, right=of si] (proj) {$\mathrm{ELU}(\mathbf{W}_s\mathbf{s}_i+\mathbf{b}_s)$};
+  \node[idb, below=of proj] (ei) {item ID embedding $\mathbf{e}_i$};
+  \node[op, right=of proj] (avg1) {$\tfrac12(+)$};
+  \node[box, right=of avg1] (e0) {fused item $\mathbf{e}^{(0)}_i$};
+  \node[op, right=12mm of e0] (avg2) {$\tfrac12(+)$};
+  \node[box, above=11mm of e0, xshift=9mm] (att) {attention over $\mathcal{N}_i$:\\$\mathbf{h}_i=\mathrm{ELU}\big(\sum_{j}\alpha_{ij}\mathbf{e}^{(0)}_j\big)$};
+  \node[sem, left=of att, xshift=-14mm] (nn) {top-30 neighbours $\mathcal{N}_i$\\(cosine of $\mathbf{s}$), weights $\alpha_{ij}$};
+  \node[sem, below=16mm of si] (su) {user text vector $\mathbf{s}_u$\\(published, fixed)};
+  \node[box, right=of su] (projU) {$\mathrm{ELU}(\mathbf{W}_u\mathbf{s}_u+\mathbf{b}_u)$};
+  \node[idb, below=of projU] (eu) {user ID embedding $\mathbf{e}_u$};
+  \node[op, right=of projU] (avg3) {$\tfrac12(+)$};
+  \node[box, right=10mm of avg2, text width=23mm, minimum height=30mm, yshift=-12mm] (gcn) {LightGCN\\3 layers over the\\user--item graph,\\mean of layers};
+  \node[box, below=of gcn] (loss) {score $\hat{y}_{ui}=\mathbf{e}_u^\top\hat{\mathbf{e}}_i$\\BPR loss};
+  \draw[arr] (si) -- (proj);
+  \draw[arr] (proj) -- (avg1);
+  \draw[arr] (ei) -| (avg1);
+  \draw[arr] (avg1) -- (e0);
+  \draw[arr] (e0) -- (avg2);
+  \draw[arr] (si.north) |- (nn.west);
+  \draw[arr] (nn) -- (att);
+  \draw[arr] ([xshift=-4mm]e0.north) |- ([yshift=2mm]e0.north -| att.south) -- (att.south);
+  \draw[arr] (att.east) -| (avg2.north);
+  \draw[arr] (avg2) -- (gcn.west |- avg2) node[midway, above, font=\scriptsize] {$\hat{\mathbf{e}}^{(0)}_i$};
+  \draw[arr] (su) -- (projU);
+  \draw[arr] (projU) -- (avg3);
+  \draw[arr] (eu) -| (avg3);
+  \draw[arr] (avg3) -- (gcn.west |- avg3) node[midway, above, font=\scriptsize] {$\mathbf{e}^{(0)}_u$};
+  \draw[arr] (gcn) -- (loss);
+\end{tikzpicture}}
+\caption{CoLaKG as implemented in the released code (our summary). Orange: text-derived inputs that our context and prompt strategies change (item side) or keep fixed (user side). The item text vector enters twice: through the fused embedding and through the choice and weighting of semantic neighbours.}
+\label{fig:colakg}
+\end{figure}
 
 The important consequence for us is that the generated text enters the model twice: directly, through the fused item embedding (Equation~\ref{eq:fusion}), and indirectly, through the choice of semantic neighbours and their attention weights (Equations~\ref{eq:attention}--\ref{eq:neighbour}). A description that captures what makes a movie similar to others can therefore help even if its own vector is noisy.
 
@@ -568,5 +610,42 @@ We studied how the information given to an LLM affects the item descriptions use
 
 \bibliographystyle{plainnat}
 \bibliography{references}
+
+\appendix
+\section{Reproducing the Experiment}
+\label{app:reproduce}
+All code is in the project repository; the upstream CoLaKG code is used unmodified at commit \texttt{be3aa19}. The complete reduced experiment is started with one command and can be interrupted and resumed at any point, because every LLM response, every text vector and every training epoch is saved as soon as it is produced:
+\begin{lstlisting}[language=bash, caption={Commands for the reduced experiment and the paper}, label={lst:commands}]
+# one short API request to check the key
+uv run --no-sync --env-file .env python scripts/overnight.py check-key
+# the whole study: subsample, generation, encoding, epoch budget, 30 runs, tests
+caffeinate -i uv run --no-sync --env-file .env python scripts/overnight.py run
+# progress from another terminal (stage, ETA, stale-heartbeat warning, log tail)
+python scripts/overnight.py status
+# all tables and figures of this paper from the saved run, then compile
+python scripts/paper_results.py artifacts/experiments/<protocol>/overnight_<hash> --skip-report
+cd paper && tectonic main.tex
+\end{lstlisting}
+
+\paragraph{Run log.} Table~\ref{tab:runlog} summarises the run that produced the results in this paper. Two problems were found and fixed while it ran. First, one provider response came back empty; transient API errors are now retried, and a response that stops at the token limit would be kept and flagged (none did). Second, profiling showed that the training wrapper executed two training passes per epoch in reduced mode, because a branch meant for the full protocol also ran. After the fix, the affected budget run and the first, partial reference run were discarded and recomputed; all generated texts and vectors were kept. None of the reported runs was affected by the bug.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{lr}
+\toprule
+Stage & Wall-clock \\
+\midrule
+Generation and encoding of 9,000 descriptions (incl.\ one restart) & $\approx$ 2.0\,h \\
+Epoch-budget run on the validation split (600 epochs) & 0.5\,h \\
+30 training runs of 400 epochs ($\approx$ 3.1\,s per epoch, Apple M4 GPU) & 10.4\,h \\
+Analysis, report and significance tests & $<$ 1\,min \\
+\midrule
+Total, including the discarded run before the bug fix & 13.5\,h \\
+\bottomrule
+\end{tabular}
+\caption{Run log of the reduced experiment}
+\label{tab:runlog}
+\end{table}
 
 \end{document}
