@@ -30,9 +30,7 @@ def make_payload(
         lines.extend(f"({labels[h]}, {r}, {labels[t]})" for h, r, t in facts[hop])
     text = "\n".join(lines)
     if len(text) > MAX_CONTEXT_CHARACTERS:
-        raise ValueError(
-            f"Context exceeds 32,000 characters for MovieID {raw_id}; inspect before changing the common budget"
-        )
+        raise ValueError(f"Context exceeds 32,000 characters for MovieID {raw_id}")
     return {
         "model": model,
         "messages": [

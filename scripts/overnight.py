@@ -4,7 +4,7 @@ budget, CoLaKG reference + 9 configurations x 3 seeds, per-user significance tes
 Commands (run from the repository root):
   prepare    build the subsample, contexts and requests (no API, no training)
   run        everything, resumable: prepare -> generate -> encode -> budget -> train -> analyse
-  status     human-readable progress (safe to run any time, from another terminal)
+  status     progress of the run
   check-key  one tiny API request to confirm the key works
 """
 
@@ -26,9 +26,7 @@ def main() -> None:
         return
     key = api_key()
     if args.command in ("run", "check-key") and not key:
-        parser.error(
-            "No API key: put DEEPSEEK_API_KEY in .env and use 'uv run --env-file .env'"
-        )
+        parser.error("LLM_API_KEY or DEEPSEEK_API_KEY is not set")
     if args.command == "prepare":
         overnight.prepare(overnight.run_dir())
     elif args.command == "check-key":

@@ -116,7 +116,7 @@ def main() -> None:
             not previous.exists()
             or json.loads(previous.read_text())["status"] != "PASS"
         ):
-            parser.error("Run the 20-item smoke check successfully first")
+            parser.error("The 20-item smoke check has not passed")
 
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
     colakg.configure("smoke_colakg", colakg.training_arguments(SEED))

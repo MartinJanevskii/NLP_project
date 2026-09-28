@@ -85,9 +85,7 @@ def status_text(run: Path) -> str:
         f"Elapsed:  {(time.time() - s['started']) / 3600:.1f} h; last update {age / 60:.0f} min ago",
     ]
     if age > STALE_SECONDS and s["stage"] not in ("COMPLETE", "FAILED"):
-        lines.append(
-            "WARNING:  STALE heartbeat (> 15 min). Is the process still running / did the Mac sleep?"
-        )
+        lines.append("WARNING:  STALE heartbeat (> 15 min)")
     if s.get("last_error"):
         lines.append(f"Error:    {s['last_error']}")
     if s.get("log") and Path(s["log"]).exists():

@@ -87,15 +87,13 @@ def run_dir() -> Path:
 
 def check_vendor() -> None:
     if not upstream_is_pinned():
-        raise SystemExit("Use the pinned, unmodified CoLaKG checkout")
+        raise SystemExit("vendor/CoLaKG is not the pinned, unmodified checkout")
 
 
 def write_if_changed(path: Path, value) -> None:
     """Write a definition file, refusing to silently replace a different one."""
     if path.exists() and read_json(path) != json.loads(json.dumps(value)):
-        raise SystemExit(
-            f"Definition changed: {path}; bump SETTINGS['version'] instead of overwriting"
-        )
+        raise SystemExit(f"Definition changed: {path}")
     atomic_json(path, value)
 
 
@@ -273,7 +271,7 @@ def train_run(
                     "curve", config=folder.name, seed=seed, **json.loads(line[6:])
                 )
     if child.returncode:
-        raise RuntimeError(f"Training failed ({folder.name}, seed {seed}); see {log}")
+        raise RuntimeError(f"Training failed ({folder.name}, seed {seed}): {log}")
     return read_json(folder / f"seed_{seed}.json")
 
 

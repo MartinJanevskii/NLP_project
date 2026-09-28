@@ -65,7 +65,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--stop-after-epoch",
         type=int,
-        help="Interrupt after a saved epoch to test resume",
+        help="Exit after this epoch (resume testing)",
     )
     parser.add_argument(
         "--data-dir", type=Path, default=DATA, help="Upstream-format dataset folder"
@@ -191,7 +191,7 @@ class Trainer:
             return False
         result = read_json(self.result_file)
         if result.get("fingerprint") != self.fingerprint:
-            raise ValueError("Training inputs changed; use a new run directory")
+            raise ValueError("Training inputs changed")
         return (
             result.get("status") == "COMPLETE"
             and self.checkpoint_file.exists()

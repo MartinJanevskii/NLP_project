@@ -31,9 +31,7 @@ def verify_saved(manifest: dict) -> None:
         or saved.get("pilot")
         or completed_metrics((ROOT / saved["log"]).read_text()) != saved.get("metrics")
     ):
-        raise SystemExit(
-            "Saved baseline completion is inconsistent; inspect its artifacts"
-        )
+        raise SystemExit("Saved baseline result is inconsistent")
 
 
 def stop(process: subprocess.Popen) -> None:
@@ -50,13 +48,13 @@ def main() -> None:
     parser.add_argument(
         "--timeout-seconds",
         type=int,
-        help="Bound a diagnostic pilot; never opens the baseline gate",
+        help="Time limit for a diagnostic pilot",
     )
     args = parser.parse_args()
     if args.timeout_seconds is not None and args.timeout_seconds <= 0:
         parser.error("timeout must be positive")
     if not upstream_is_pinned():
-        raise SystemExit("Expected the pinned, unmodified upstream checkout")
+        raise SystemExit("vendor/CoLaKG is not the pinned, unmodified checkout")
     manifest = load_manifest(MANIFEST)
     if manifest["baseline"]["status"] == "COMPLETE":
         verify_saved(manifest)

@@ -56,13 +56,13 @@ def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     parser.add_argument(
         "--run-tag",
         default="",
-        help="Separate training artifacts after code/environment changes; reuse text/vector caches",
+        help="Suffix for the run directory",
     )
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
     args = parser.parse_args()
     if not 1 <= args.workers <= 8 or not 1 <= args.pilot_epochs <= 10:
-        parser.error("Use 1–8 request workers and 1–10 pilot epochs")
+        parser.error("--workers must be 1–8 and --pilot-epochs 1–10")
     if args.run_tag and not re.fullmatch(r"[A-Za-z0-9_-]+", args.run_tag):
         parser.error(
             "Run tags may contain only letters, digits, hyphens and underscores"
@@ -165,7 +165,7 @@ class Experiment:
         )
         configs = read_json(previous)["configurations"] if previous.exists() else {}
         if any(configs.get(c, {}).get("status") != "COMPLETE" for c in self.configs):
-            self.parser.error(f"Complete the matching {size}-item validation first")
+            self.parser.error(f"The matching {size}-item validation is not complete")
 
     def prepare(self) -> None:
         self.requests = {}
@@ -188,9 +188,7 @@ class Experiment:
             ):
                 path = folder / name
                 if path.exists() and read_json(path) != json.loads(json.dumps(value)):
-                    raise ValueError(
-                        f"Context/prompt definition changed: {path}; increment protocol version before rerunning"
-                    )
+                    raise ValueError(f"Definition changed: {path}")
                 atomic_json(path, value)
             self.manifest["configurations"].setdefault(
                 config,
@@ -282,7 +280,7 @@ class Experiment:
     def run_all(self) -> None:
         key = api_key()
         if not key:
-            self.parser.error("Load your API key with uv run --env-file .env")
+            self.parser.error("LLM_API_KEY or DEEPSEEK_API_KEY is not set")
         self.manifest["status"] = "RUNNING"
         self.save()
         try:
@@ -342,7 +340,7 @@ class Experiment:
 def main() -> None:
     parser, args = parse_args()
     if not upstream_is_pinned():
-        parser.error("Use the pinned, unmodified CoLaKG checkout")
+        parser.error("vendor/CoLaKG is not the pinned, unmodified checkout")
     Experiment(parser, args).main()
 
 

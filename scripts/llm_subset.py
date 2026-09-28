@@ -55,7 +55,7 @@ def parse_args() -> tuple[argparse.ArgumentParser, argparse.Namespace]:
     parser.add_argument("--upstream-responses", action="store_true")
     args = parser.parse_args()
     if args.generate and args.upstream_responses:
-        parser.error("Choose published responses or live generation")
+        parser.error("--generate and --upstream-responses are mutually exclusive")
     return parser, args
 
 
@@ -79,7 +79,7 @@ def collect_responses(parser, args, requests, cache) -> tuple[list[str], list[di
         return [], []
     key = api_key()
     if args.generate and not key:
-        parser.error("Set LLM_API_KEY or DEEPSEEK_API_KEY locally; never commit it")
+        parser.error("LLM_API_KEY or DEEPSEEK_API_KEY is not set")
     responses, records = [], []
     for request in requests:
         payload = request["payload"]
@@ -181,7 +181,7 @@ def main() -> None:
             not previous.exists()
             or json.loads(previous.read_text()).get("encoding") != "PASS"
         ):
-            parser.error("Encode and validate the 20-item subset first")
+            parser.error("The 20-item subset has not passed encoding")
     requests = build_requests(args)
     atomic_json(output / "requests.json", requests)
     scale = {

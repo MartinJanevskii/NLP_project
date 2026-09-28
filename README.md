@@ -16,7 +16,7 @@ with its original descriptions. The paper is in [`paper/`](paper/).
 ## Requirements
 
 - macOS or Linux, with `git`
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) (it installs Python 3.13 for you)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)
 - A [DeepSeek API key](https://platform.deepseek.com/) (the run makes about 9,000 requests)
 - Around 13 hours for the full run on an Apple M-series Mac; slower on CPU only
 - A few GB of free disk space (the sentence encoder alone is about 1.4 GB)
@@ -44,7 +44,7 @@ uv sync
 
 ```sh
 cp .env.sample .env
-# open .env and fill in DEEPSEEK_API_KEY=...
+# set DEEPSEEK_API_KEY in .env
 ```
 
 **4. Prepare.** This builds the knowledge graph and writes the experiment protocol.
@@ -64,16 +64,14 @@ uv run --env-file .env python scripts/overnight.py check-key
 **6. Run the experiment.** It generates the descriptions, encodes them, picks the
 epoch budget on a validation split, trains the CoLaKG reference and the nine
 configurations with three seeds each, and runs the statistics.
-On a Mac, `caffeinate -i` keeps the machine awake.
 
 ```sh
 caffeinate -i uv run --env-file .env python scripts/overnight.py run
 ```
 
-If it stops for any reason, run the same command again. It continues where it left off,
-and responses that were already generated are never requested (or paid for) again.
+The run is resumable; cached responses are never requested again.
 
-**7. Watch progress** from another terminal at any time:
+**7. Progress:**
 
 ```sh
 uv run python scripts/overnight.py status
