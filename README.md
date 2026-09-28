@@ -78,7 +78,7 @@ uv run python scripts/overnight.py status
 ```
 
 **8. Build the paper.** Use the run folder printed by `status`. You need
-[tectonic](https://tectonic-typesetting.github.io/) (`brew install tectonic`).
+[tectonic](https://tectonic-typesetting.github.io/).
 
 ```sh
 uv run python scripts/paper_results.py artifacts/experiments/<protocol>/overnight_<id> --skip-report
