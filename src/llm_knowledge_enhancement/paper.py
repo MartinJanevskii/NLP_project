@@ -1,22 +1,48 @@
-"""Write the paper's LaTeX tables and PDF figures from one saved experiment run.
+"""The paper's LaTeX tables and PDF figures, generated from one saved run.
 
-Reads saved artifacts only: no LLM calls, no training. Works on pilots and full/.
-Usage: python scripts/paper_results.py artifacts/experiments/<protocol>/<run>
+Reads saved files only: no LLM calls and no training.
 """
 
-import argparse
 import csv
 import json
-import os
 import re
 import statistics
 from collections import Counter
 from pathlib import Path
 
-from experiment import DATA, build_kg, context, make_payload, read_json
-from run_baseline import ROOT, load_manifest
+from llm_knowledge_enhancement.design import CONFIGS, METRICS
+from llm_knowledge_enhancement.files import load_manifest, read_item_map, read_json
+from llm_knowledge_enhancement.kg import build_kg, context
+from llm_knowledge_enhancement.paths import DATA, MANIFEST, ROOT
+from llm_knowledge_enhancement.prompts import make_payload
 
 OUT = ROOT / "paper/generated"
+METRIC_TEX = {
+    m: m.split("@")[0].capitalize().replace("Ndcg", "NDCG") + "@" + m[-2:]
+    for m in METRICS
+}
+CONTRAST_LABELS = {
+    "RQ1_H2_minus_H1": r"RQ1: H2 $-$ H1 (mean over P1--P3)",
+    "RQ2_P2_minus_P1_over_H1_H2": r"RQ2: P2 $-$ P1 (mean over H1, H2)",
+    "RQ2_P3_minus_P1_over_H1_H2": r"RQ2: P3 $-$ P1 (mean over H1, H2)",
+    "RQ3_depth_effect_P2_minus_P1": r"RQ3: depth effect under P2 $-$ under P1",
+    "RQ3_depth_effect_P3_minus_P1": r"RQ3: depth effect under P3 $-$ under P1",
+    "RQ4_H3_minus_H2_P1": r"RQ4: H3 $-$ H2 (P1)",
+    "RQ4_H3_minus_H2_P2": r"RQ4: H3 $-$ H2 (P2)",
+    "RQ4_H3_minus_H2_P3": r"RQ4: H3 $-$ H2 (P3)",
+}
+SHORT_LABELS = {
+    "RQ1_H2_minus_H1": r"RQ1 H2$-$H1",
+    "RQ2_P2_minus_P1_over_H1_H2": r"RQ2 P2$-$P1",
+    "RQ2_P3_minus_P1_over_H1_H2": r"RQ2 P3$-$P1",
+    "RQ3_depth_effect_P2_minus_P1": r"RQ3 depth$\times$P2",
+    "RQ3_depth_effect_P3_minus_P1": r"RQ3 depth$\times$P3",
+    "RQ4_H3_minus_H2_P1": r"RQ4 H3$-$H2 (P1)",
+    "RQ4_H3_minus_H2_P2": r"RQ4 H3$-$H2 (P2)",
+    "RQ4_H3_minus_H2_P3": r"RQ4 H3$-$H2 (P3)",
+}
+PILOT_TITLE = "ENGINEERING PILOT (not research results)"
+EXAMPLE_MOVIE = 1
 SPECIAL = {
     "\\": r"\textbackslash{}",
     "&": r"\&",
@@ -117,35 +143,6 @@ def movie_keys(row):
     }
 
 
-CONFIGS = [h + p for h in ("H1", "H2", "H3") for p in ("P1", "P2", "P3")]
-METRICS = ("recall@10", "recall@20", "ndcg@10", "ndcg@20")
-METRIC_TEX = {
-    m: m.split("@")[0].capitalize().replace("Ndcg", "NDCG") + "@" + m[-2:]
-    for m in METRICS
-}
-CONTRASTS = {
-    "RQ1_H2_minus_H1": r"RQ1: H2 $-$ H1 (mean over P1--P3)",
-    "RQ2_P2_minus_P1_over_H1_H2": r"RQ2: P2 $-$ P1 (mean over H1, H2)",
-    "RQ2_P3_minus_P1_over_H1_H2": r"RQ2: P3 $-$ P1 (mean over H1, H2)",
-    "RQ3_depth_effect_P2_minus_P1": r"RQ3: depth effect under P2 $-$ under P1",
-    "RQ3_depth_effect_P3_minus_P1": r"RQ3: depth effect under P3 $-$ under P1",
-    "RQ4_H3_minus_H2_P1": r"RQ4: H3 $-$ H2 (P1)",
-    "RQ4_H3_minus_H2_P2": r"RQ4: H3 $-$ H2 (P2)",
-    "RQ4_H3_minus_H2_P3": r"RQ4: H3 $-$ H2 (P3)",
-}
-SHORT = {
-    "RQ1_H2_minus_H1": r"RQ1 H2$-$H1",
-    "RQ2_P2_minus_P1_over_H1_H2": r"RQ2 P2$-$P1",
-    "RQ2_P3_minus_P1_over_H1_H2": r"RQ2 P3$-$P1",
-    "RQ3_depth_effect_P2_minus_P1": r"RQ3 depth$\times$P2",
-    "RQ3_depth_effect_P3_minus_P1": r"RQ3 depth$\times$P3",
-    "RQ4_H3_minus_H2_P1": r"RQ4 H3$-$H2 (P1)",
-    "RQ4_H3_minus_H2_P2": r"RQ4 H3$-$H2 (P2)",
-    "RQ4_H3_minus_H2_P3": r"RQ4 H3$-$H2 (P3)",
-}
-PILOT_TITLE = "ENGINEERING PILOT (not research results)"
-
-
 def read_csv(path):
     if not path.exists():
         return []
@@ -220,7 +217,6 @@ def kg_tables(labels, adjacency):
         tag=False,
     )
     fig, ax = plt.subplots(figsize=(7, 3.5))
-    # Integer-aligned log bins, so degrees 1, 2, 3 each get their own bar.
     bins = (
         np.unique(np.round(np.logspace(0, np.log10(max(degree.values()) + 1), 25)))
         - 0.5
@@ -259,12 +255,12 @@ def context_sizes(mapping, labels, adjacency):
                         "content"
                     ]
                 )
-                for (raw, _), f in zip(mapping, facts)
+                for (raw, _), f in zip(mapping, facts, strict=True)
             ],
         }
     rows = []
     for strategy, s in sizes.items():
-        total = [a + b for a, b in zip(s["first"], s["second"])]
+        total = [a + b for a, b in zip(s["first"], s["second"], strict=True)]
         rows.append(
             [
                 strategy,
@@ -291,13 +287,16 @@ def context_sizes(mapping, labels, adjacency):
     )
     fig, ax = plt.subplots(figsize=(7, 3.5))
     ax.boxplot(
-        [[a + b for a, b in zip(s["first"], s["second"])] for s in sizes.values()],
+        [
+            [a + b for a, b in zip(s["first"], s["second"], strict=True)]
+            for s in sizes.values()
+        ],
         tick_labels=list(sizes),
         showfliers=False,
     )
     ax.set(ylabel="Triples in context", xlabel="Context strategy")
     save(fig, "context_sizes", False)
-    raw = 1  # Toy Story (1995), the running example used throughout the paper
+    raw = EXAMPLE_MOVIE
     h1, h2, h3 = (context(raw, s, adjacency) for s in ("H1", "H2", "H3"))
 
     def triple(edge):
@@ -319,7 +318,7 @@ def context_sizes(mapping, labels, adjacency):
     )
 
 
-def results(run, pilot):
+def main_results(run, pilot):
     import matplotlib.pyplot as plt
     import numpy as np
 
@@ -350,9 +349,7 @@ def results(run, pilot):
         if reference:
             rows.append(reference)
         elif not pilot:
-            baseline = load_manifest(ROOT / "artifacts/EXPERIMENT_MANIFEST.json")[
-                "baseline"
-            ]
+            baseline = load_manifest(MANIFEST)["baseline"]
             label = "CoLaKG (orig.)"
             if baseline.get("status") == "COMPLETE":
                 rows.append(
@@ -406,7 +403,7 @@ def results(run, pilot):
         return
     lookup = {(e["comparison"], e["metric"]): e for e in effects}
     rows = []
-    for name, label in CONTRASTS.items():
+    for name, label in CONTRAST_LABELS.items():
         if (name, "ndcg@20") in lookup:
             rows.append(
                 [label]
@@ -426,13 +423,13 @@ def results(run, pilot):
 def reference_row(run):
     """CoLaKG with its published embeddings, trained in the same run (reduced runs)."""
     seeds = sorted((run / "reference").glob("seed_*.json"))
-    results = [read_json(p) for p in seeds]
-    results = [r for r in results if r.get("status") == "COMPLETE"]
-    if len(results) < 2:
+    completed = [read_json(p) for p in seeds]
+    completed = [r for r in completed if r.get("status") == "COMPLETE"]
+    if len(completed) < 2:
         return None
     cells = []
     for m in METRICS:
-        values = [r["metrics"][m] for r in results]
+        values = [r["metrics"][m] for r in completed]
         cells.append(
             f"{statistics.mean(values):.4f} $\\pm$ {statistics.stdev(values):.4f}"
         )
@@ -455,7 +452,7 @@ def significance(run):
         )
         body.append(
             [
-                SHORT.get(r["comparison"], tex(r["comparison"])),
+                SHORT_LABELS.get(r["comparison"], tex(r["comparison"])),
                 f"{float(r['mean_difference']):+.5f}",
                 f"[{float(r['ci_low']):+.5f}, {float(r['ci_high']):+.5f}]",
                 f"{float(r['p_holm']):.3g}",
@@ -632,7 +629,7 @@ def text_stats(run, pilot):
         xs = [means[c]["input_tokens"] + means[c]["output_tokens"] for c in shared]
         ys = [float(summary[c]["ndcg@20_mean"]) for c in shared]
         ax.scatter(xs, ys)
-        for c, x, y in zip(shared, xs, ys):
+        for c, x, y in zip(shared, xs, ys, strict=True):
             ax.annotate(
                 c, (x, y), textcoords="offset points", xytext=(4, 4), fontsize=8
             )
@@ -646,7 +643,6 @@ def text_stats(run, pilot):
     if examples:
         title = examples[0]["title"]
         same = [e for e in examples if e["title"] == title]
-        # Prefer the diagonal H1P1/H2P2/H3P3; partial runs show what exists.
         chosen = [
             e for e in same if e["configuration"] in ("H1P1", "H2P2", "H3P3")
         ] or same[:3]
@@ -694,11 +690,7 @@ def embedding_space(run, rows_by_raw, pilot):
     published = torch.load(
         DATA / "movie_embeddings_simcse_kg.pt", map_location="cpu", weights_only=True
     )
-    # Rows carry raw MovieIDs; reduced runs re-index item_id, so map through item_map.txt.
-    original = dict(
-        tuple(map(int, line.split()))
-        for line in (DATA / "item_map.txt").read_text().splitlines()
-    )
+    original = dict(read_item_map())
     sets = {
         "Published": (
             published[[original[r["raw_movie_id"]] for r in order]].numpy(),
@@ -730,7 +722,7 @@ def embedding_space(run, rows_by_raw, pilot):
     common = [g for g, _ in Counter(first).most_common(6)]
     colours = [f"C{common.index(g)}" if g in common else "lightgrey" for g in first]
     fig, axes = plt.subplots(2, 5, figsize=(12, 5.2))
-    for ax, (name, (vectors, _)) in zip(axes.flat, sets.items()):
+    for ax, (name, (vectors, _)) in zip(axes.flat, sets.items(), strict=False):
         points = TSNE(
             perplexity=min(30, (len(vectors) - 1) // 3), init="pca", random_state=0
         ).fit_transform(vectors)
@@ -747,24 +739,11 @@ def embedding_space(run, rows_by_raw, pilot):
     save(fig, "tsne", pilot)
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("run", type=Path, help="Run directory containing manifest.json")
-    parser.add_argument(
-        "--skip-report", action="store_true", help="Reuse the run's existing CSVs"
-    )
-    args = parser.parse_args()
-    run = args.run.resolve()
-    if not (run / "manifest.json").exists():
-        parser.error(f"Not a run directory (missing manifest.json): {run}")
-    os.environ.setdefault("MPLCONFIGDIR", str(run / "matplotlib_cache"))
+def generate(run: Path) -> None:
+    """Write every table and figure for `run` into paper/generated/."""
     import matplotlib
 
     matplotlib.use("Agg")
-    if not args.skip_report:
-        from experiment_report import report
-
-        report(run)
     OUT.mkdir(parents=True, exist_ok=True)
     clear_outputs()
     manifest = read_json(run / "manifest.json")
@@ -772,24 +751,13 @@ def main():
     with (DATA / "ml1m_extended_movie.csv").open() as file:
         movies = list(csv.DictReader(file))
     labels, adjacency = build_kg(movies)
-    mapping = sorted(
-        (
-            tuple(map(int, line.split()))
-            for line in (DATA / "item_map.txt").read_text().splitlines()
-        ),
-        key=lambda pair: pair[1],
-    )
+    mapping = read_item_map()
     run_info(run, manifest, pilot)
     kg_tables(labels, adjacency)
     context_sizes(mapping, labels, adjacency)
-    results(run, pilot)
+    main_results(run, pilot)
     significance(run)
     dataset_summary(run)
     learning_curves(run, pilot)
     text_stats(run, pilot)
     embedding_space(run, {int(m["MovieID"]): m for m in movies}, pilot)
-    print("Paper inputs written to", OUT)
-
-
-if __name__ == "__main__":
-    main()

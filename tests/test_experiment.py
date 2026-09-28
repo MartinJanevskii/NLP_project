@@ -1,4 +1,4 @@
-"""Offline KG checks; optionally verify interruption/resume against a real pilot."""
+"""KG extraction, context sampling and prompt checks; optionally resume against a real pilot."""
 
 import argparse
 import math
@@ -8,8 +8,11 @@ import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from experiment import PROMPTS, ROOT, build_kg, context, make_payload, read_json
-from experiment_report import contrasts, mentions
+from llm_knowledge_enhancement.files import read_json
+from llm_knowledge_enhancement.kg import build_kg, context
+from llm_knowledge_enhancement.paths import ROOT
+from llm_knowledge_enhancement.prompts import PROMPTS, make_payload
+from llm_knowledge_enhancement.report import contrasts, mentions
 
 rows = [
     dict(

@@ -1,10 +1,11 @@
-"""Run with: python scripts/test_baseline.py (no training dependencies)."""
+"""Baseline completion gate and manifest handling."""
 
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from run_baseline import completed_metrics, load_manifest
+from llm_knowledge_enhancement.baseline import completed_metrics
+from llm_knowledge_enhancement.files import load_manifest
 
 with TemporaryDirectory() as directory:
     path = Path(directory) / "manifest.json"

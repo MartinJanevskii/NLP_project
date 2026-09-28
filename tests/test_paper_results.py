@@ -4,7 +4,7 @@ import json
 import tempfile
 from pathlib import Path
 
-import paper_results as pr
+from llm_knowledge_enhancement import paper as pr
 
 assert pr.tex("Tom & Jerry_50% #1 $") == r"Tom \& Jerry\_50\% \#1 \$"
 assert (
@@ -32,18 +32,15 @@ with tempfile.TemporaryDirectory() as folder:
     assert r"\caption{Cap}" in (pr.OUT / "u.tex").read_text()
     pr.pending("p", "Cap", "no seeds")
     assert "Pending: no seeds" in (pr.OUT / "p.tex").read_text()
-    # A run with no completed seeds or responses yields pending tables, not a crash.
     empty_run = Path(folder) / "run"
     empty_run.mkdir()
-    pr.results(empty_run, pilot=True)
+    pr.main_results(empty_run, pilot=True)
     pr.text_stats(empty_run, pilot=True)
     for name in ("main_results", "contrasts", "text_stats"):
         assert "Pending:" in (pr.OUT / f"{name}.tex").read_text(), name
-    # Outputs of an earlier run never survive into a later one.
     (pr.OUT / "heatmap_ndcg20.pdf").write_text("stale")
     pr.clear_outputs()
     assert not [p for p in pr.OUT.iterdir() if p.suffix in (".tex", ".pdf")]
-    # Qualitative examples fall back to whichever configurations exist.
     partial = Path(folder) / "partial"
     partial.mkdir()
     columns = [
@@ -67,7 +64,6 @@ with tempfile.TemporaryDirectory() as folder:
     )
     pr.text_stats(partial, pilot=False)
     assert r"\item[H1P2] A crime film." in (pr.OUT / "qualitative.tex").read_text()
-    # Full runs get a short reference-row label that fits the page width.
     (partial / "aggregated.csv").write_text(
         "configuration,"
         + ",".join(f"{m}_{s}" for m in pr.METRICS for s in ("mean", "std"))
@@ -75,9 +71,8 @@ with tempfile.TemporaryDirectory() as folder:
         + ",".join(["0.1"] * 8)
         + "\n"
     )
-    pr.results(partial, pilot=False)
+    pr.main_results(partial, pilot=False)
     assert "CoLaKG (orig.)" in (pr.OUT / "main_results.tex").read_text()
-    # Reduced overnight runs: reference row from its three seeds, significance and dataset tables.
     reduced = Path(folder) / "reduced"
     (reduced / "reference").mkdir(parents=True)
     for seed, value in ((42, 0.1), (123, 0.2), (2026, 0.3)):

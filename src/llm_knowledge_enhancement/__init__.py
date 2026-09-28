@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from llm-knowledge-enhancement!")
+"""KG context and prompt strategies for LLM-enhanced recommendation with CoLaKG."""

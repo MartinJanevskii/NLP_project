@@ -1,4 +1,4 @@
-"""Offline request/cache checks: python scripts/test_llm_subset.py."""
+"""Request building, response caching and truncated-response handling, offline."""
 
 import io
 import json
@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from llm_subset import generate, request_id
+from llm_knowledge_enhancement.llm import generate, request_id
 
 payload = {
     "model": "deepseek-chat",
@@ -19,7 +19,8 @@ with TemporaryDirectory() as directory:
         "choices": [{"finish_reason": "stop", "message": {"content": "A description"}}]
     }
     with patch(
-        "llm_subset.urlopen", return_value=io.BytesIO(json.dumps(response).encode())
+        "llm_knowledge_enhancement.llm.urlopen",
+        return_value=io.BytesIO(json.dumps(response).encode()),
     ) as api:
         first = generate(endpoint, payload, "test-key", cache)
         assert api.call_count == 1
@@ -27,7 +28,8 @@ with TemporaryDirectory() as directory:
         assert json.loads(request.data) == payload
         assert request.get_header("Authorization") == "Bearer test-key"
     with patch(
-        "llm_subset.urlopen", side_effect=AssertionError("Cache must prevent API call")
+        "llm_knowledge_enhancement.llm.urlopen",
+        side_effect=AssertionError("Cache must prevent API call"),
     ):
         assert generate(endpoint, payload, "test-key", cache) == first
     assert request_id(endpoint, payload) != request_id(
@@ -37,7 +39,8 @@ with TemporaryDirectory() as directory:
     response["choices"][0]["finish_reason"] = "length"
     changed = dict(payload, model="different")
     with patch(
-        "llm_subset.urlopen", return_value=io.BytesIO(json.dumps(response).encode())
+        "llm_knowledge_enhancement.llm.urlopen",
+        return_value=io.BytesIO(json.dumps(response).encode()),
     ):
         try:
             generate(endpoint, changed, "test-key", cache)
