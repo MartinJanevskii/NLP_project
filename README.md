@@ -1,72 +1,141 @@
-# Recommendation system 
+# Knowledge Graph Context Meets Prompt Design
 
-## Intro
+NLP course project, FINKI.
 
-Project for the course NLP at university FINKI. 
+We study how the knowledge-graph context and the prompt given to an LLM change the
+movie descriptions it writes, and whether that changes recommendation quality in the
+CoLaKG recommender. The recommender, data split, encoder and user vectors stay the
+same; only the LLM input changes:
 
-## Required tooling 
+- **Context:** H1 direct facts, H2 direct + sampled two-hop facts, H3 filtered two-hop facts
+- **Prompt:** P1 generic description, P2 extract-then-describe, P3 recommendation-oriented
 
-The project, atm uses the following tools: 
+That gives nine configurations. Each is trained with three seeds and compared to CoLaKG
+with its original descriptions. The paper is in [`paper/`](paper/).
 
-- postgres(vector db)
-- neo4j(graph db)
-- uv 
-- dvc
-- docker 
+## Requirements
 
-Please install them so that you can start working on the project. 
+- macOS or Linux, with `git`
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) (it installs Python 3.13 for you)
+- A [DeepSeek API key](https://platform.deepseek.com/) (the run makes about 9,000 requests)
+- Around 13 hours for the full run on an Apple M-series Mac; slower on CPU only
+- A few GB of free disk space (the sentence encoder alone is about 1.4 GB)
 
-## Quickstart 
+## Quick start
 
-When first starting off with the project, install [uv](https://docs.astral.sh/uv/getting-started/installation/) and execute `uv sync `. This will download all the necessary packages, defined in the [pyproject.toml](./pyproject.toml). Also don't forget to activate the python venv. 
+All commands run from the repository root.
 
-The project structure is the following: 
-- /model 
-    - This is the folder for versioning model weights. Files like `pkl`,`pt` will be stored here. 
-- /reports 
-    - The folder will be store `csv`,`json` files which contain results, from the experiment runs, for the models. 
-- /notebooks 
-    - The folder will store notebooks that do some kind of EDA either on datasets(the data folder) or the reports
-- /src 
-    - The folder will store all the code logic. Logic for defining data pipelines, training loops, test loops...; will be stored here
-- /data
-    - The folder will contain all the raw and processed that on which the model will be trained. 
-- /db 
-    - The folder will contain configuration files affecting the vector / graph databases. For example, we have the [init.sql](./db/vector/init.sql)  
-
-Every folder, listed from above, will be versioned with dvc and stored remotely on the `DagsHub` [backend](https://dagshub.com/viki123v/llm-knowledge-enhancement/src/feature/NLP-13/s3:/llm-knowledge-enhancement). This will allow us to bypass git's default max file size and store indiscriminate number of files of enormous sizes(hopefully).
-
-To be in sync with the data stored in the `DagsHub` backend use `dvc`. `DVC` works similar to git, so all the commands you know and love will still work. For example, for pulling changes for the data, you should use `dvc pull`. The configuration for dvc is defined in the [this](./.dvc/config) config file. For security reasons you need to fill in the [config.local.sample](./.dvc/config.local.sample) to access the backend. If you a contributor to the project, you can find the access credentials [here](https://dagshub.com/viki123v/llm-knowledge-enhancement/src/feature/NLP-13/s3:/llm-knowledge-enhancement). 
-
-To start the databases, firstly fill in the placeholder values in [.env.sample](.env.sample). After that run `docker compose up` and this should start the databases with all the configuration. 
-
-## Paper
-
-The LaTeX paper lives in [paper/](paper/). Every table and figure in it is generated
-from a saved experiment run; nothing is typed in by hand.
+**1. Get the code and the original CoLaKG repository.** The MovieLens data comes with CoLaKG.
 
 ```sh
-# 1. Regenerate tables/figures from a run (pilot now, full/ later). No API calls, no training.
-.venv/bin/python scripts/paper_results.py artifacts/experiments/<protocol>/<run>
-# 2. Compile (install once with: brew install tectonic)
+git clone https://github.com/MartinJanevskii/NLP_project.git
+cd NLP_project
+git clone https://github.com/ziqiangcui/CoLaKG-SIGIR25.git vendor/CoLaKG
+git -C vendor/CoLaKG checkout be3aa19b59419d197dd4e20f44db737041821f58
+```
+
+**2. Install the dependencies.**
+
+```sh
+uv sync
+```
+
+**3. Add your API key.**
+
+```sh
+cp .env.sample .env
+# open .env and fill in DEEPSEEK_API_KEY=...
+```
+
+**4. Prepare.** This builds the knowledge graph and writes the experiment protocol.
+It makes no API calls.
+
+```sh
+uv run python scripts/experiment.py
+uv run python scripts/overnight.py prepare
+```
+
+**5. Check the key.** This sends one tiny request.
+
+```sh
+uv run --env-file .env python scripts/overnight.py check-key
+```
+
+**6. Run the experiment.** It generates the descriptions, encodes them, picks the
+epoch budget on a validation split, trains the CoLaKG reference and the nine
+configurations with three seeds each, and runs the statistics.
+On a Mac, `caffeinate -i` keeps the machine awake.
+
+```sh
+caffeinate -i uv run --env-file .env python scripts/overnight.py run
+```
+
+If it stops for any reason, run the same command again. It continues where it left off,
+and responses that were already generated are never requested (or paid for) again.
+
+**7. Watch progress** from another terminal at any time:
+
+```sh
+uv run python scripts/overnight.py status
+```
+
+**8. Build the paper.** Use the run folder printed by `status`. You need
+[tectonic](https://tectonic-typesetting.github.io/) (`brew install tectonic`).
+
+```sh
+uv run python scripts/paper_results.py artifacts/experiments/<protocol>/overnight_<id> --skip-report
 cd paper && tectonic main.tex
 ```
 
-On a pilot run every generated caption is marked **[ENGINEERING PILOT]**. The paper
-compiles without any run too: missing inputs show as placeholder boxes. Result-dependent
-text is marked with red `\todo{}` notes. Offline check: `.venv/bin/python scripts/test_paper_results.py`.
+## Results
 
-## Overnight reduced run (Mac M4)
+Everything is written to `artifacts/experiments/<protocol>/overnight_<id>/`:
 
-A complete study (9 configurations + CoLaKG reference, 3 seeds) on a random 1,000-item
-subsample with a validation-chosen epoch budget; ~13 h on an M4. Resumable at any point.
+| File | Contents |
+|---|---|
+| `findings.json` | Summary: metrics per configuration, contrasts, text statistics |
+| `significance.csv` | Per-user Wilcoxon tests with Holm correction and the verdict per hypothesis |
+| `aggregated.csv`, `per_seed.csv` | Recall@10/20 and NDCG@10/20, averaged and per seed |
+| `text_analysis.csv` | Context size, response length, entity coverage and token counts per item |
+| `report.md` | A readable summary with plots and example descriptions |
+
+Your numbers can differ slightly from the paper: DeepSeek may answer the same prompt
+a little differently over time, and training on Apple GPUs is not bit-for-bit repeatable.
+
+`paper/generated/` holds the tables and figures the paper includes. They are produced
+by step 8, never edited by hand.
+
+## Tests
+
+Quick offline checks. They need no API key and do no training.
 
 ```sh
-uv run --no-sync --env-file .env python scripts/overnight.py check-key   # one tiny API call
-caffeinate -i uv run --no-sync --env-file .env python scripts/overnight.py run
-.venv/bin/python scripts/overnight.py status                             # from another terminal
-.venv/bin/python scripts/paper_results.py artifacts/experiments/<protocol>/overnight_<hash> --skip-report
+for test in tests/test_*.py; do uv run python "$test"; done
 ```
 
-Results: `findings.json` and `significance.csv` in the run folder (pre-registered per-user
-Wilcoxon tests with Holm correction). Offline checks: `.venv/bin/python scripts/test_overnight.py`.
+## Project layout
+
+```
+scripts/                       command-line entry points
+  overnight.py                 the reduced study above (prepare / run / status / check-key)
+  experiment.py                20- and 100-item pilots and the full 2,000-epoch protocol
+  paper_results.py             paper tables and figures from a run
+  experiment_train.py          trains CoLaKG for one configuration and seed
+  experiment_report.py         CSV tables, plots and report.md for a run
+  run_baseline.py              the unmodified CoLaKG training (CUDA machine)
+  llm_subset.py, smoke_colakg.py  checks that the original CoLaKG pipeline is reproduced
+src/llm_knowledge_enhancement/ the shared code
+  kg.py, prompts.py            knowledge graph, the H1-H3 contexts and the P1-P3 prompts
+  llm.py, encoder.py           DeepSeek client with response cache, SimCSE encoder
+  training.py                  CoLaKG training and per-user evaluation
+  overnight.py, reduced.py     the reduced study and its dataset
+  report.py, stats.py, paper.py  tables, significance tests and paper output
+tests/                         offline checks
+paper/                         LaTeX source of the paper
+vendor/CoLaKG/                 the original CoLaKG code and data (cloned in step 1)
+artifacts/                     everything a run produces (not in git)
+```
+
+The original 2,000-epoch CoLaKG baseline (`run_baseline.py`) needs Python 3.8 and CUDA;
+its environment is described in `requirements-baseline-cuda.txt` and
+`requirements-pipeline-cuda.txt`.
