@@ -170,7 +170,7 @@ We reconstruct the KG from the metadata following the released CoLaKG preprocess
 \end{itemize}
 Every fact is also added in the reverse direction (\textit{directed}, \textit{starred in}, \textit{is the genre of}, \textit{are the genres of}), so that we can walk from an attribute back to other movies. This gives eight relation types. Movie nodes are identified by MovieID, not by title, so two different movies with the same title are never merged. Attribute nodes are identified by name, which means that a person who both directs and acts is a single node. Source Code~\ref{lst:build-kg} shows the construction.
 
-\begin{lstlisting}[caption={Knowledge graph construction (from \texttt{scripts/experiment.py}, lightly trimmed)}, label={lst:build-kg}]
+\begin{lstlisting}[caption={Knowledge graph construction (from \texttt{src/llm\_knowledge\_enhancement/kg.py}, lightly trimmed)}, label={lst:build-kg}]
 def build_kg(rows):
     labels, edges = {}, set()
     for row in rows:
@@ -616,14 +616,17 @@ We studied how the information given to an LLM affects the item descriptions use
 \label{app:reproduce}
 All code is in the project repository; the upstream CoLaKG code is used unmodified at commit \texttt{be3aa19}. The complete reduced experiment is started with one command and can be interrupted and resumed at any point, because every LLM response, every text vector and every training epoch is saved as soon as it is produced:
 \begin{lstlisting}[language=bash, caption={Commands for the reduced experiment and the paper}, label={lst:commands}]
+# once: install, and write the experiment protocol (no API calls)
+uv sync
+uv run python scripts/experiment.py
 # one short API request to check the key
-uv run --no-sync --env-file .env python scripts/overnight.py check-key
+uv run --env-file .env python scripts/overnight.py check-key
 # the whole study: subsample, generation, encoding, epoch budget, 30 runs, tests
-caffeinate -i uv run --no-sync --env-file .env python scripts/overnight.py run
+caffeinate -i uv run --env-file .env python scripts/overnight.py run
 # progress from another terminal (stage, ETA, stale-heartbeat warning, log tail)
-python scripts/overnight.py status
+uv run python scripts/overnight.py status
 # all tables and figures of this paper from the saved run, then compile
-python scripts/paper_results.py artifacts/experiments/<protocol>/overnight_<hash> --skip-report
+uv run python scripts/paper_results.py artifacts/experiments/<protocol>/overnight_<hash> --skip-report
 cd paper && tectonic main.tex
 \end{lstlisting}
 
