@@ -2,8 +2,6 @@
 .env.*
 !.env.sample
 !.env.example
-data/
-**/docker/
 /vendor/
 # Generated runs, paid response caches and weights are transferred separately.
 /artifacts/*
@@ -17,12 +15,8 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 
-# Local session notes, not project documentation.
-/PROJECT_STATE.md
-/CLEANUP_PROGRESS.md
 
-# LaTeX build outputs and plan-execution scratch
+# LaTeX build outputs
 /paper/*.pdf
 /paper/*.aux
 /paper/*.log
-/.superpowers/
